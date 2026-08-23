@@ -183,13 +183,13 @@ main{
 }
 
 /*
-SVG inline nel DOM:
-testo, forme e path restano vettoriali.
+Importante:
+NON impostiamo width:100% sull'SVG.
+La larghezza viene fissata in pixel quando il file viene aperto,
+così lo zoom del browser può ingrandirlo realmente.
 */
 #svgViewer svg{
     display:block;
-    width:100%;
-    height:auto;
     max-width:none;
     margin:0;
     padding:0;
@@ -540,9 +540,9 @@ window.loadPDF = async function(url){
 
 /*
 SVG:
-il file viene scaricato come testo XML e inserito
-direttamente nel DOM. Non usiamo <img>.
-Questo mantiene testo, path e forme come vettori reali.
+il file viene caricato come XML e inserito direttamente nel DOM.
+La larghezza iniziale viene fissata in pixel una sola volta,
+così lo zoom del browser può ingrandirlo realmente.
 */
 window.loadSVG = async function(url){
 
@@ -588,8 +588,8 @@ window.loadSVG = async function(url){
         }
 
         /*
-        Se il file SVG ha già un viewBox lo conserviamo.
-        Se manca, proviamo a ricavarlo da width/height.
+        Se manca il viewBox, proviamo a ricavarlo
+        dalle dimensioni originali del file.
         */
         if(!svg.hasAttribute("viewBox")){
 
@@ -615,9 +615,7 @@ window.loadSVG = async function(url){
         }
 
         /*
-        Rimuoviamo width/height fissi.
-        La dimensione visuale viene gestita dal CSS,
-        mentre il viewBox mantiene il sistema di coordinate.
+        Togliamo eventuali dimensioni fisse originali.
         */
         svg.removeAttribute("width");
         svg.removeAttribute("height");
@@ -627,16 +625,19 @@ window.loadSVG = async function(url){
             "xMinYMin meet"
         );
 
+        /*
+        Adattiamo l'SVG alla finestra SOLO nel momento
+        in cui viene aperto.
+        Dopo resta a questa larghezza CSS in pixel.
+        */
+        const initialViewerWidth =
+            svgViewer.clientWidth;
+
         svg.style.display = "block";
-        svg.style.width = "100%";
+        svg.style.width =
+            initialViewerWidth + "px";
         svg.style.height = "auto";
         svg.style.maxWidth = "none";
-
-        /*
-        Gli eventuali script contenuti nell'SVG inserito via
-        innerHTML non vengono eseguiti automaticamente.
-        Per un portfolio statico è preferibile così.
-        */
 
         window.scrollTo({
             top:0,
@@ -661,8 +662,7 @@ window.loadSVG = async function(url){
 
 /*
 HTML:
-manteniamo il caricamento dinamico per eventuali
-pagine Vimeo / contenuti HTML.
+manteniamo il caricamento dinamico.
 */
 window.loadHTML = async function(url){
 
@@ -743,9 +743,7 @@ window.loadHTML = async function(url){
 };
 
 /*
-HOME:
-la home principale è ora un SVG.
-Se il nome è diverso, modifica solamente questa riga.
+HOME SVG.
 */
 window.loadHome = function(){
 
