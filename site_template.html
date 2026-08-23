@@ -157,6 +157,7 @@ main{
     background:#fff;
     overflow-x:auto;
     overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
 }
 
 .pdf-page{
@@ -180,13 +181,15 @@ main{
     background:#fff;
     display:none;
     overflow-x:auto;
+    overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
 }
 
 /*
-Importante:
-NON impostiamo width:100% sull'SVG.
-La larghezza viene fissata in pixel quando il file viene aperto,
-così lo zoom del browser può ingrandirlo realmente.
+L'SVG non viene forzato a width:100%.
+La larghezza viene impostata via JavaScript:
+- desktop: larghezza della finestra;
+- mobile: larghezza naturale del viewBox, così resta scorrevole.
 */
 #svgViewer svg{
     display:block;
@@ -263,6 +266,7 @@ footer a:hover{
 }
 
 @media(max-width:800px){
+
     header{
         align-items:flex-start;
         justify-content:space-between;
@@ -324,6 +328,15 @@ footer a:hover{
 
     .video-project{
         padding:10px 12px 40px;
+    }
+
+    /*
+    Il footer resta largo quanto lo schermo.
+    Solo l'area SVG scorre orizzontalmente.
+    */
+    footer{
+        padding:18px;
+        white-space:normal;
     }
 }
 </style>
@@ -402,10 +415,6 @@ function hideAllViewers(){
 
 }
 
-/*
-PDF:
-rimane disponibile come fallback.
-*/
 window.loadPDF = async function(url){
 
     const renderId = ++currentRenderId;
@@ -518,12 +527,6 @@ window.loadPDF = async function(url){
     }
 };
 
-/*
-SVG:
-il file viene caricato come XML e inserito direttamente nel DOM.
-La larghezza iniziale viene fissata in pixel una sola volta,
-così lo zoom del browser può ingrandirlo realmente.
-*/
 window.loadSVG = async function(url){
 
     const renderId = ++currentRenderId;
@@ -568,35 +571,62 @@ window.loadSVG = async function(url){
         }
 
         /*
-        Se manca il viewBox, proviamo a ricavarlo
-        dalle dimensioni originali del file.
+        Leggiamo prima le dimensioni originali.
+        Servono soprattutto su mobile.
+        */
+        let naturalWidth = NaN;
+        let naturalHeight = NaN;
+
+        const viewBox =
+            svg.getAttribute("viewBox");
+
+        if(viewBox){
+
+            const values =
+                viewBox
+                .trim()
+                .split(/[\s,]+/)
+                .map(Number);
+
+            if(
+                values.length === 4 &&
+                values.every(Number.isFinite)
+            ){
+                naturalWidth = values[2];
+                naturalHeight = values[3];
+            }
+        }
+
+        /*
+        Se manca il viewBox proviamo a ricavarlo
+        da width/height.
         */
         if(!svg.hasAttribute("viewBox")){
 
-            const width =
+            const originalWidth =
                 parseFloat(
                     svg.getAttribute("width")
                 );
 
-            const height =
+            const originalHeight =
                 parseFloat(
                     svg.getAttribute("height")
                 );
 
             if(
-                Number.isFinite(width) &&
-                Number.isFinite(height)
+                Number.isFinite(originalWidth) &&
+                Number.isFinite(originalHeight)
             ){
                 svg.setAttribute(
                     "viewBox",
-                    `0 0 ${width} ${height}`
+                    `0 0 ${originalWidth} ${originalHeight}`
                 );
+
+                naturalWidth = originalWidth;
+                naturalHeight = originalHeight;
             }
         }
 
-        /*
-        Togliamo eventuali dimensioni fisse originali.
-        */
         svg.removeAttribute("width");
         svg.removeAttribute("height");
 
@@ -605,19 +635,55 @@ window.loadSVG = async function(url){
             "xMinYMin meet"
         );
 
-        /*
-        Adattiamo l'SVG alla finestra SOLO nel momento
-        in cui viene aperto.
-        Dopo resta a questa larghezza CSS in pixel.
-        */
-        const initialViewerWidth =
-            svgViewer.clientWidth;
+        const isMobile =
+            window.matchMedia(
+                "(max-width:800px)"
+            ).matches;
+
+        let targetWidth;
+
+        if(isMobile){
+
+            /*
+            Su telefono NON adattiamo l'opera
+            alla larghezza dello schermo.
+
+            Usiamo la larghezza naturale del viewBox.
+            Se per qualche motivo non è disponibile,
+            usiamo 1200px come fallback.
+
+            Risultato:
+            la tavola resta grande e si può scorrere
+            orizzontalmente con il dito.
+            */
+            targetWidth =
+                Number.isFinite(naturalWidth)
+                ? naturalWidth
+                : 1200;
+
+        }
+        else{
+
+            /*
+            Su desktop la tavola parte adattata
+            alla larghezza disponibile.
+            */
+            targetWidth =
+                svgViewer.clientWidth;
+
+        }
 
         svg.style.display = "block";
         svg.style.width =
-            initialViewerWidth + "px";
+            targetWidth + "px";
         svg.style.height = "auto";
         svg.style.maxWidth = "none";
+
+        /*
+        Quando apriamo un nuovo progetto,
+        partiamo sempre dal bordo sinistro.
+        */
+        svgViewer.scrollLeft = 0;
 
         window.scrollTo({
             top:0,
@@ -640,10 +706,6 @@ window.loadSVG = async function(url){
     }
 };
 
-/*
-HTML:
-manteniamo il caricamento dinamico.
-*/
 window.loadHTML = async function(url){
 
     const renderId = ++currentRenderId;
@@ -722,9 +784,6 @@ window.loadHTML = async function(url){
     }
 };
 
-/*
-HOME SVG.
-*/
 window.loadHome = function(){
 
     loadSVG(
