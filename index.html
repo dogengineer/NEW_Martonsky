@@ -7,6 +7,16 @@
 <link rel="icon" type="image/png" href="icons/favicon.png">
 
 <style>
+/* Martonsky-inspired UI skin. Viewer/rendering logic below is unchanged. */
+:root{
+    --page:#fff;
+    --ink:#111;
+    --muted:#999;
+    --rule:#111;
+    --menu-bg:#fff;
+    --ui-font:"Helvetica Neue",Helvetica,Arial,sans-serif;
+}
+
 *{
     margin:0;
     padding:0;
@@ -17,8 +27,8 @@ html,
 body{
     width:100%;
     min-height:100%;
-    background:#fff;
-    color:#000;
+    background:var(--page);
+    color:var(--ink);
 }
 
 body{
@@ -26,15 +36,22 @@ body{
     min-height:100dvh;
     display:flex;
     flex-direction:column;
-    font-family:Arial,Helvetica,sans-serif;
+    font-family:var(--ui-font);
+    font-size:13px;
+    font-weight:400;
+    line-height:1.25;
+    letter-spacing:0;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
 }
 
 header{
     width:100%;
+    min-height:72px;
     display:flex;
     align-items:center;
-    padding:22px 30px;
-    background:#fff;
+    padding:18px 27px 16px;
+    background:var(--page);
     position:relative;
     z-index:1000;
     flex-shrink:0;
@@ -42,7 +59,7 @@ header{
 
 .logo{
     display:block;
-    margin-right:50px;
+    margin-right:44px;
     text-decoration:none;
     cursor:pointer;
     flex-shrink:0;
@@ -50,7 +67,7 @@ header{
 
 .logo img{
     display:block;
-    width:160px;
+    width:155px;
     height:auto;
     border:0;
 }
@@ -62,7 +79,7 @@ nav{
 nav>ul{
     display:flex;
     align-items:center;
-    gap:30px;
+    gap:28px;
     list-style:none;
 }
 
@@ -72,32 +89,55 @@ nav li{
 
 nav a,
 .menu-label,
-.submenu-label{
-    color:#000;
+.submenu-label,
+.empty-item{
+    font-family:var(--ui-font);
+    color:var(--ink);
     text-decoration:none;
-    font-size:14px;
+    font-size:13px;
+    font-weight:400;
+    line-height:1.25;
+}
+
+nav a,
+.menu-label,
+.submenu-label{
     cursor:pointer;
 }
 
 nav a:hover,
 .menu-label:hover,
 .submenu-label:hover{
-    opacity:.55;
+    opacity:.48;
 }
 
 .top-menu-item{
     position:relative;
 }
 
+/* Desktop drop-downs: sharp white boxes with the thin black rule used
+   throughout the original Martonsky visual language. */
 .submenu{
     display:none;
     position:absolute;
-    top:100%;
-    left:0;
-    min-width:220px;
-    background:#fff;
-    padding:12px 0;
+    top:calc(100% + 9px);
+    left:-10px;
+    min-width:208px;
+    background:var(--menu-bg);
+    border:1px solid var(--rule);
+    padding:5px 0;
     z-index:2000;
+    box-shadow:none;
+}
+
+/* small bridge: keeps hover active between label and menu */
+.submenu::before{
+    content:"";
+    position:absolute;
+    left:-1px;
+    right:-1px;
+    top:-10px;
+    height:10px;
 }
 
 .top-menu-item:hover>.submenu{
@@ -116,18 +156,33 @@ nav a:hover,
     align-items:center;
     justify-content:space-between;
     width:100%;
-    min-width:220px;
-    padding:6px 14px;
+    min-width:206px;
+    padding:5px 10px 5px 10px;
     white-space:nowrap;
-    background:#fff;
+    background:var(--menu-bg);
+}
+
+.submenu a:hover,
+.submenu-label:hover{
+    opacity:1;
+    background:#f2f2f2;
 }
 
 .submenu li>.submenu{
     display:none;
     position:absolute;
-    top:0;
-    left:100%;
-    padding-left:2px;
+    top:-6px;
+    left:calc(100% + 5px);
+    padding:5px 0;
+}
+
+.submenu li>.submenu::before{
+    left:-6px;
+    top:-1px;
+    bottom:-1px;
+    width:6px;
+    height:auto;
+    right:auto;
 }
 
 .submenu li.has-submenu:hover>.submenu{
@@ -135,19 +190,16 @@ nav a:hover,
 }
 
 .arrow{
-    margin-left:25px;
-    font-size:18px;
-    line-height:14px;
+    margin-left:28px;
+    font-size:16px;
+    font-weight:300;
+    line-height:12px;
 }
 
-.empty-item{
-    font-size:14px;
-    opacity:.4;
-    cursor:default;
-}
-
+.empty-item,
 .empty-section{
-    opacity:.4;
+    color:var(--muted);
+    opacity:1;
     cursor:default;
 }
 
@@ -157,13 +209,13 @@ main{
     display:flex;
     justify-content:center;
     align-items:center;
-    background:#fff;
+    background:var(--page);
 }
 
 #viewer{
     width:100%;
     min-height:calc(100vh - 110px);
-    background:#fff;
+    background:var(--page);
     overflow-x:auto;
     overflow-y:hidden;
 }
@@ -175,18 +227,18 @@ main{
     padding:0;
     border:0;
     outline:0;
-    background:#fff;
+    background:var(--page);
 }
 
 #htmlViewer{
     width:100%;
-    background:#fff;
+    background:var(--page);
     display:none;
 }
 
 #svgViewer{
     width:100%;
-    background:#fff;
+    background:var(--page);
     display:none;
     overflow-x:auto;
 }
@@ -199,23 +251,28 @@ main{
     padding:0;
     border:0;
     outline:0;
-    background:#fff;
+    background:var(--page);
 }
 
 #loading{
     display:none;
     text-align:center;
     padding:40px;
-    font-size:13px;
+    font-family:var(--ui-font);
+    font-size:12px;
+    font-weight:400;
     width:100%;
 }
 
 footer{
     width:100%;
     margin-top:auto;
-    padding:18px 30px;
-    background:#fff;
-    font-size:11px;
+    padding:16px 27px 18px;
+    background:var(--page);
+    font-family:var(--ui-font);
+    font-size:10px;
+    font-weight:400;
+    line-height:1.2;
     text-align:center;
     flex-shrink:0;
 }
@@ -233,7 +290,12 @@ footer a:hover{
     display:none;
     background:none;
     border:0;
-    font-size:22px;
+    padding:0;
+    color:var(--ink);
+    font-family:var(--ui-font);
+    font-size:20px;
+    font-weight:300;
+    line-height:1;
     cursor:pointer;
 }
 
@@ -271,9 +333,14 @@ footer a:hover{
 
 @media(max-width:800px){
     header{
+        min-height:58px;
         align-items:flex-start;
         justify-content:space-between;
-        padding:18px;
+        padding:16px 18px 12px;
+    }
+
+    .logo{
+        margin-right:0;
     }
 
     .logo img{
@@ -282,16 +349,19 @@ footer a:hover{
 
     .mobile-button{
         display:block;
+        margin-top:1px;
     }
 
     nav{
         display:none;
         position:absolute;
         left:0;
-        top:60px;
+        top:54px;
         width:100%;
-        background:#fff;
-        padding:20px;
+        background:var(--page);
+        padding:14px 18px 18px;
+        border-top:1px solid var(--rule);
+        border-bottom:1px solid var(--rule);
     }
 
     nav.open{
@@ -303,26 +373,54 @@ footer a:hover{
     }
 
     nav>ul>li{
-        margin-bottom:15px;
+        margin-bottom:10px;
+    }
+
+    nav>ul>li:last-child{
+        margin-bottom:0;
+    }
+
+    nav a,
+    .menu-label,
+    .submenu-label,
+    .empty-item{
+        font-size:13px;
     }
 
     .submenu{
         display:block;
         position:static;
-        padding:5px 0 5px 15px;
+        min-width:0;
+        margin:5px 0 2px 0;
+        padding:0 0 0 14px;
+        border:0;
+        background:transparent;
+    }
+
+    .submenu::before{
+        display:none;
     }
 
     .submenu li>.submenu{
         display:block;
         position:static;
-        padding-left:15px;
+        margin:2px 0 0 0;
+        padding:0 0 0 14px;
+        border:0;
     }
 
     .submenu a,
     .submenu-label,
     .empty-item{
         min-width:0;
-        padding:5px 0;
+        padding:3px 0;
+        background:transparent;
+    }
+
+    .submenu a:hover,
+    .submenu-label:hover{
+        background:transparent;
+        opacity:.48;
     }
 
     .arrow{
@@ -352,8 +450,8 @@ footer a:hover{
     }
 
     footer{
-        padding:18px;
-        font-size:11px;
+        padding:14px 18px 16px;
+        font-size:10px;
         white-space:normal;
     }
 }
@@ -391,6 +489,11 @@ footer a:hover{
 <li><a href="#" onclick="loadSVG(&quot;pdf/02_Commissioned/01_Cani Grassi.svg&quot;);return false;">Cani Grassi</a></li>
 <li><a href="#" onclick="loadSVG(&quot;pdf/02_Commissioned/02_Topo di plastica.svg&quot;);return false;">Topo di plastica</a></li>
 <li><a href="#" onclick="loadSVG(&quot;pdf/02_Commissioned/03_Beyond_Human_Skin_merged.svg&quot;);return false;">Beyond_Human_Skin_merged</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/02_Commissioned/04_pippo da solo.svg&quot;);return false;">pippo da solo</a></li>
+<li class="has-submenu"><span class="submenu-label">Miao con i gattini<span class="arrow">›</span></span><ul class="submenu">
+<li><a href="#" onclick="loadSVG(&quot;pdf/02_Commissioned/05_Miao con i gattini/01_Cani Grassi.svg&quot;);return false;">Cani Grassi</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/02_Commissioned/05_Miao con i gattini/02_Topo di plastica.svg&quot;);return false;">Topo di plastica</a></li>
+</ul></li>
 </ul></li>
 <li><a href="#" onclick="loadSVG(&quot;pdf/03_Artist Statement/02_Topo di plastica.svg&quot;);return false;">Artist Statement</a></li>
 <li><span class="menu-label empty-section">About</span></li>
