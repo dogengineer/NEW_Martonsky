@@ -157,7 +157,6 @@ main{
     background:#fff;
     overflow-x:auto;
     overflow-y:hidden;
-    -webkit-overflow-scrolling:touch;
 }
 
 .pdf-page{
@@ -181,15 +180,12 @@ main{
     background:#fff;
     display:none;
     overflow-x:auto;
-    overflow-y:hidden;
-    -webkit-overflow-scrolling:touch;
 }
 
 /*
-L'SVG non viene forzato a width:100%.
-La larghezza viene impostata via JavaScript:
-- desktop: larghezza della finestra;
-- mobile: larghezza naturale del viewBox, così resta scorrevole.
+SVG inline nel DOM:
+testo, forme e path restano vettoriali.
+La larghezza iniziale viene fissata in pixel quando il file viene aperto.
 */
 #svgViewer svg{
     display:block;
@@ -266,7 +262,6 @@ footer a:hover{
 }
 
 @media(max-width:800px){
-
     header{
         align-items:flex-start;
         justify-content:space-between;
@@ -329,15 +324,6 @@ footer a:hover{
     .video-project{
         padding:10px 12px 40px;
     }
-
-    /*
-    Il footer resta largo quanto lo schermo.
-    Solo l'area SVG scorre orizzontalmente.
-    */
-    footer{
-        padding:18px;
-        white-space:normal;
-    }
 }
 </style>
 </head>
@@ -366,6 +352,7 @@ footer a:hover{
 <li><a href="#" onclick="loadSVG(&quot;pdf/01_Illustrations/03_nipote di prova/03_nipote di prova - Copia/02_Project-Two.svg&quot;);return false;">Project-Two</a></li>
 </ul></li>
 </ul></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/01_Illustrations/home-page_2.svg&quot;);return false;">home-page_2</a></li>
 </ul></li>
 <li class="top-menu-item"><span class="menu-label">Commissioned</span><ul class="submenu">
 <li><a href="#" onclick="loadSVG(&quot;pdf/02_Commissioned/01_Cani Grassi.svg&quot;);return false;">Cani Grassi</a></li>
@@ -590,60 +577,26 @@ window.loadSVG = async function(url){
             );
         }
 
-        /*
-        Leggiamo prima le dimensioni originali.
-        Servono soprattutto su mobile.
-        */
-        let naturalWidth = NaN;
-        let naturalHeight = NaN;
-
-        const viewBox =
-            svg.getAttribute("viewBox");
-
-        if(viewBox){
-
-            const values =
-                viewBox
-                .trim()
-                .split(/[\s,]+/)
-                .map(Number);
-
-            if(
-                values.length === 4 &&
-                values.every(Number.isFinite)
-            ){
-                naturalWidth = values[2];
-                naturalHeight = values[3];
-            }
-        }
-
-        /*
-        Se manca il viewBox proviamo a ricavarlo
-        da width/height.
-        */
         if(!svg.hasAttribute("viewBox")){
 
-            const originalWidth =
+            const width =
                 parseFloat(
                     svg.getAttribute("width")
                 );
 
-            const originalHeight =
+            const height =
                 parseFloat(
                     svg.getAttribute("height")
                 );
 
             if(
-                Number.isFinite(originalWidth) &&
-                Number.isFinite(originalHeight)
+                Number.isFinite(width) &&
+                Number.isFinite(height)
             ){
                 svg.setAttribute(
                     "viewBox",
-                    `0 0 ${originalWidth} ${originalHeight}`
+                    `0 0 ${width} ${height}`
                 );
-
-                naturalWidth = originalWidth;
-                naturalHeight = originalHeight;
             }
         }
 
@@ -655,54 +608,24 @@ window.loadSVG = async function(url){
             "xMinYMin meet"
         );
 
-        const isMobile =
-            window.matchMedia(
-                "(max-width:800px)"
-            ).matches;
+        /*
+        Torniamo al comportamento precedente:
+        sia desktop sia mobile partono adattati
+        alla larghezza disponibile nel momento
+        in cui l'SVG viene aperto.
 
-        let targetWidth;
-
-        if(isMobile){
-
-            /*
-            Su telefono NON adattiamo l'opera
-            alla larghezza dello schermo.
-
-            Usiamo la larghezza naturale del viewBox.
-            Se per qualche motivo non è disponibile,
-            usiamo 1200px come fallback.
-
-            Risultato:
-            la tavola resta grande e si può scorrere
-            orizzontalmente con il dito.
-            */
-            targetWidth =
-                Number.isFinite(naturalWidth)
-                ? naturalWidth
-                : 1200;
-
-        }
-        else{
-
-            /*
-            Su desktop la tavola parte adattata
-            alla larghezza disponibile.
-            */
-            targetWidth =
-                svgViewer.clientWidth;
-
-        }
+        La larghezza resta poi fissata in pixel,
+        così lo zoom del browser continua a funzionare.
+        */
+        const initialViewerWidth =
+            svgViewer.clientWidth;
 
         svg.style.display = "block";
         svg.style.width =
-            targetWidth + "px";
+            initialViewerWidth + "px";
         svg.style.height = "auto";
         svg.style.maxWidth = "none";
 
-        /*
-        Quando apriamo un nuovo progetto,
-        partiamo sempre dal bordo sinistro.
-        */
         svgViewer.scrollLeft = 0;
 
         window.scrollTo({
