@@ -22,6 +22,10 @@ body{
 }
 
 body{
+    min-height:100vh;
+    min-height:100dvh;
+    display:flex;
+    flex-direction:column;
     font-family:Arial,Helvetica,sans-serif;
 }
 
@@ -33,6 +37,7 @@ header{
     background:#fff;
     position:relative;
     z-index:1000;
+    flex-shrink:0;
 }
 
 .logo{
@@ -148,6 +153,10 @@ nav a:hover,
 
 main{
     width:100%;
+    flex:1;
+    display:flex;
+    justify-content:center;
+    align-items:flex-start;
     background:#fff;
 }
 
@@ -162,7 +171,7 @@ main{
 .pdf-page{
     display:block;
     max-width:none;
-    margin:0;
+    margin:0 auto;
     padding:0;
     border:0;
     outline:0;
@@ -182,15 +191,11 @@ main{
     overflow-x:auto;
 }
 
-/*
-SVG inline nel DOM:
-testo, forme e path restano vettoriali.
-La larghezza iniziale viene fissata in pixel quando il file viene aperto.
-*/
 #svgViewer svg{
     display:block;
     max-width:none;
-    margin:0;
+    margin-left:auto;
+    margin-right:auto;
     padding:0;
     border:0;
     outline:0;
@@ -202,14 +207,17 @@ La larghezza iniziale viene fissata in pixel quando il file viene aperto.
     text-align:center;
     padding:40px;
     font-size:13px;
+    width:100%;
 }
 
 footer{
     width:100%;
+    margin-top:auto;
     padding:18px 30px;
     background:#fff;
     font-size:11px;
     text-align:center;
+    flex-shrink:0;
 }
 
 footer a{
@@ -321,8 +329,29 @@ footer a:hover{
         display:none;
     }
 
+    main{
+        justify-content:center;
+    }
+
+    #svgViewer{
+        display:none;
+        width:100%;
+        overflow-x:auto;
+    }
+
+    #svgViewer svg{
+        margin-left:auto;
+        margin-right:auto;
+    }
+
     .video-project{
         padding:10px 12px 40px;
+    }
+
+    footer{
+        padding:18px;
+        font-size:11px;
+        white-space:normal;
     }
 }
 </style>
@@ -584,18 +613,9 @@ window.loadSVG = async function(url){
 
         svg.setAttribute(
             "preserveAspectRatio",
-            "xMinYMin meet"
+            "xMidYMin meet"
         );
 
-        /*
-        Torniamo al comportamento precedente:
-        sia desktop sia mobile partono adattati
-        alla larghezza disponibile nel momento
-        in cui l'SVG viene aperto.
-
-        La larghezza resta poi fissata in pixel,
-        così lo zoom del browser continua a funzionare.
-        */
         const initialViewerWidth =
             svgViewer.clientWidth;
 
@@ -604,6 +624,8 @@ window.loadSVG = async function(url){
             initialViewerWidth + "px";
         svg.style.height = "auto";
         svg.style.maxWidth = "none";
+        svg.style.marginLeft = "auto";
+        svg.style.marginRight = "auto";
 
         svgViewer.scrollLeft = 0;
 
