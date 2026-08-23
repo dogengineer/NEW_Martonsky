@@ -1,1 +1,6 @@
 C:\php\php.exe -S localhost:8000
+
+
+python generate_site.py
+python -m http.server 8000
+http://localhost:8000/
