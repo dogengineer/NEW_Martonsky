@@ -7,18 +7,18 @@ BASE_DIR = Path("pdf")
 TEMPLATE_FILE = Path("site_template.html")
 OUTPUT_FILE = Path("index.html")
 
-SUPPORTED_EXTENSIONS = {".pdf", ".html", ".htm"}
+SUPPORTED_EXTENSIONS = {".pdf", ".html", ".htm", ".svg"}
 
 def clean_name(name: str) -> str:
     name = Path(name).name
     name = re.sub(r"^\d+_", "", name)
-    name = re.sub(r"(?:\.(?:pdf|html|htm))+$", "", name, flags=re.I)
+    name = re.sub(r"(?:\.(?:pdf|html|htm|svg))+$", "", name, flags=re.I)
     return name.strip()
 
 def get_order(name: str) -> int:
     name = Path(name).name
-    m = re.match(r"^(\d+)_", name)
-    return int(m.group(1)) if m else 999999
+    match = re.match(r"^(\d+)_", name)
+    return int(match.group(1)) if match else 999999
 
 def is_supported_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
@@ -28,31 +28,40 @@ def get_folder_items(folder: Path):
         return []
 
     items = [
-        p for p in folder.iterdir()
-        if p.is_dir() or is_supported_file(p)
+        item for item in folder.iterdir()
+        if item.is_dir() or is_supported_file(item)
     ]
 
-    items.sort(key=lambda p: (get_order(p.name), clean_name(p.name).lower()))
+    items.sort(
+        key=lambda item: (
+            get_order(item.name),
+            clean_name(item.name).lower()
+        )
+    )
+
     return items
 
 def file_link(path: Path, label: str) -> str:
     url = path.as_posix()
     safe_label = html.escape(label)
     js_url = html.escape(json.dumps(url), quote=True)
+    extension = path.suffix.lower()
 
-    if path.suffix.lower() == ".pdf":
-        return (
-            f'<a href="#" onclick="loadPDF({js_url});return false;">'
-            f'{safe_label}</a>'
-        )
+    if extension == ".pdf":
+        action = f"loadPDF({js_url})"
+    elif extension == ".svg":
+        action = f"loadSVG({js_url})"
+    else:
+        action = f"loadHTML({js_url})"
 
     return (
-        f'<a href="#" onclick="loadHTML({js_url});return false;">'
+        f'<a href="#" onclick="{action};return false;">'
         f'{safe_label}</a>'
     )
 
 def render_submenu(folder: Path) -> str:
     items = get_folder_items(folder)
+
     if not items:
         return ""
 
@@ -100,8 +109,13 @@ def render_submenu(folder: Path) -> str:
                     + render_submenu(item)
                     + '</li>'
                 )
+
         else:
-            out.append('<li>' + file_link(item, label) + '</li>')
+            out.append(
+                '<li>'
+                + file_link(item, label)
+                + '</li>'
+            )
 
     out.append('</ul>')
     return "\n".join(out)
@@ -110,8 +124,17 @@ def render_navigation() -> str:
     if not BASE_DIR.is_dir():
         return ""
 
-    top_folders = [p for p in BASE_DIR.iterdir() if p.is_dir()]
-    top_folders.sort(key=lambda p: (get_order(p.name), clean_name(p.name).lower()))
+    top_folders = [
+        folder for folder in BASE_DIR.iterdir()
+        if folder.is_dir()
+    ]
+
+    top_folders.sort(
+        key=lambda folder: (
+            get_order(folder.name),
+            clean_name(folder.name).lower()
+        )
+    )
 
     out = []
 
@@ -163,7 +186,9 @@ def main():
     navigation = render_navigation()
 
     if "{{NAVIGATION}}" not in template:
-        raise RuntimeError("Placeholder {{NAVIGATION}} non trovato in site_template.html")
+        raise RuntimeError(
+            "Placeholder {{NAVIGATION}} non trovato in site_template.html"
+        )
 
     output = template.replace("{{NAVIGATION}}", navigation)
     OUTPUT_FILE.write_text(output, encoding="utf-8")

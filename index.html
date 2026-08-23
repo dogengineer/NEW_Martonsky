@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Martonsky</title>
-<link rel="icon" type="image/png" href="Icons/favicon.png">
+<link rel="icon" type="image/png" href="icons/favicon.png">
 
 <style>
 *{
@@ -175,6 +175,29 @@ main{
     display:none;
 }
 
+#svgViewer{
+    width:100%;
+    background:#fff;
+    display:none;
+    overflow-x:auto;
+}
+
+/*
+SVG inline nel DOM:
+testo, forme e path restano vettoriali.
+*/
+#svgViewer svg{
+    display:block;
+    width:100%;
+    height:auto;
+    max-width:none;
+    margin:0;
+    padding:0;
+    border:0;
+    outline:0;
+    background:#fff;
+}
+
 #loading{
     display:none;
     text-align:center;
@@ -193,10 +216,6 @@ footer{
 footer a{
     color:inherit;
     text-decoration:none;
-}
-
-footer a:hover{
-    text-decoration:underline;
 }
 
 footer a:hover{
@@ -316,30 +335,30 @@ footer a:hover{
 
 <a class="logo"
    href="#"
-   onclick="loadPDF('pdf/home.pdf');return false;"
+   onclick="loadHome();return false;"
    aria-label="Home">
-    <img src="Icons/icon.png" alt="Martonsky">
+    <img src="icons/icon.png" alt="Martonsky">
 </a>
 
 <nav id="mainMenu">
 <ul>
 <li class="top-menu-item"><span class="menu-label">Illustrations</span><ul class="submenu">
-<li><a href="#" onclick="loadPDF(&quot;pdf/01_Illustrations/01_Beyond Human Skin.pdf.pdf&quot;);return false;">Beyond Human Skin</a></li>
-<li><a href="#" onclick="loadPDF(&quot;pdf/01_Illustrations/02_Project Two.pdf.pdf&quot;);return false;">Project Two</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/01_Illustrations/01_Beyond-Human-Skin.svg&quot;);return false;">Beyond-Human-Skin</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/01_Illustrations/02_Project-Two.svg&quot;);return false;">Project-Two</a></li>
 <li class="has-submenu"><span class="submenu-label">nipote di prova<span class="arrow">›</span></span><ul class="submenu">
-<li><a href="#" onclick="loadPDF(&quot;pdf/01_Illustrations/03_nipote di prova/01_Beyond Human Skin.pdf.pdf&quot;);return false;">Beyond Human Skin</a></li>
-<li><a href="#" onclick="loadPDF(&quot;pdf/01_Illustrations/03_nipote di prova/02_Project Two.pdf.pdf&quot;);return false;">Project Two</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/01_Illustrations/03_nipote di prova/01_Beyond-Human-Skin.svg&quot;);return false;">Beyond-Human-Skin</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/01_Illustrations/03_nipote di prova/02_Project-Two.svg&quot;);return false;">Project-Two</a></li>
 <li class="has-submenu"><span class="submenu-label">nipote di prova - Copia<span class="arrow">›</span></span><ul class="submenu">
 <li><a href="#" onclick="loadHTML(&quot;pdf/01_Illustrations/03_nipote di prova/03_nipote di prova - Copia/01_Animations.html&quot;);return false;">Animations</a></li>
-<li><a href="#" onclick="loadPDF(&quot;pdf/01_Illustrations/03_nipote di prova/03_nipote di prova - Copia/02_Project Two.pdf.pdf&quot;);return false;">Project Two</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/01_Illustrations/03_nipote di prova/03_nipote di prova - Copia/02_Project-Two.svg&quot;);return false;">Project-Two</a></li>
 </ul></li>
 </ul></li>
 </ul></li>
 <li class="top-menu-item"><span class="menu-label">Commissioned</span><ul class="submenu">
-<li><a href="#" onclick="loadPDF(&quot;pdf/02_Commissioned/01_Cani grassi.pdf.pdf&quot;);return false;">Cani grassi</a></li>
-<li><a href="#" onclick="loadPDF(&quot;pdf/02_Commissioned/02_Topo di Plastica.pdf.pdf&quot;);return false;">Topo di Plastica</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/02_Commissioned/01_Cani Grassi.svg&quot;);return false;">Cani Grassi</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/02_Commissioned/02_Topo di plastica.svg&quot;);return false;">Topo di plastica</a></li>
 </ul></li>
-<li><a href="#" onclick="loadPDF(&quot;pdf/03_Artist Statement/02_Topo di Plastica.pdf.pdf&quot;);return false;">Artist Statement</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/03_Artist Statement/02_Topo di plastica.svg&quot;);return false;">Artist Statement</a></li>
 <li><span class="menu-label empty-section">About</span></li>
 <li><span class="menu-label empty-section">CV</span></li>
 <li><span class="menu-label empty-section">Contact</span></li>
@@ -361,6 +380,7 @@ aria-label="Menu">
 <div id="loading">Loading...</div>
 <div id="viewer"></div>
 <div id="htmlViewer"></div>
+<div id="svgViewer"></div>
 
 </main>
 
@@ -385,27 +405,35 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 
 const viewer = document.getElementById("viewer");
 const htmlViewer = document.getElementById("htmlViewer");
+const svgViewer = document.getElementById("svgViewer");
 const loading = document.getElementById("loading");
 
-let currentType = "pdf";
-let currentURL = "pdf/home.pdf";
 let currentRenderId = 0;
 
-window.loadPDF = async function(url){
+function hideAllViewers(){
 
-    currentType = "pdf";
-    currentURL = url;
+    viewer.style.display = "none";
+    htmlViewer.style.display = "none";
+    svgViewer.style.display = "none";
+
+    viewer.innerHTML = "";
+    htmlViewer.innerHTML = "";
+    svgViewer.innerHTML = "";
+
+}
+
+/*
+PDF:
+rimane disponibile come fallback.
+*/
+window.loadPDF = async function(url){
 
     const renderId = ++currentRenderId;
 
     closeMobileMenu();
+    hideAllViewers();
 
     viewer.style.display = "block";
-    htmlViewer.style.display = "none";
-
-    htmlViewer.innerHTML = "";
-    viewer.innerHTML = "";
-
     loading.style.display = "block";
 
     try{
@@ -510,21 +538,20 @@ window.loadPDF = async function(url){
     }
 };
 
-window.loadHTML = async function(url){
+/*
+SVG:
+il file viene scaricato come testo XML e inserito
+direttamente nel DOM. Non usiamo <img>.
+Questo mantiene testo, path e forme come vettori reali.
+*/
+window.loadSVG = async function(url){
 
-    currentType = "html";
-    currentURL = url;
-
-    currentRenderId++;
+    const renderId = ++currentRenderId;
 
     closeMobileMenu();
+    hideAllViewers();
 
-    viewer.style.display = "none";
-    htmlViewer.style.display = "block";
-
-    viewer.innerHTML = "";
-    htmlViewer.innerHTML = "";
-
+    svgViewer.style.display = "block";
     loading.style.display = "block";
 
     try{
@@ -539,12 +566,135 @@ window.loadHTML = async function(url){
             );
         }
 
-        const html =
+        const svgText =
             await response.text();
+
+        if(renderId !== currentRenderId){
+            return;
+        }
 
         loading.style.display = "none";
 
-        htmlViewer.innerHTML = html;
+        svgViewer.innerHTML =
+            svgText;
+
+        const svg =
+            svgViewer.querySelector("svg");
+
+        if(!svg){
+            throw new Error(
+                "Il file caricato non contiene un elemento <svg> valido."
+            );
+        }
+
+        /*
+        Se il file SVG ha già un viewBox lo conserviamo.
+        Se manca, proviamo a ricavarlo da width/height.
+        */
+        if(!svg.hasAttribute("viewBox")){
+
+            const width =
+                parseFloat(
+                    svg.getAttribute("width")
+                );
+
+            const height =
+                parseFloat(
+                    svg.getAttribute("height")
+                );
+
+            if(
+                Number.isFinite(width) &&
+                Number.isFinite(height)
+            ){
+                svg.setAttribute(
+                    "viewBox",
+                    `0 0 ${width} ${height}`
+                );
+            }
+        }
+
+        /*
+        Rimuoviamo width/height fissi.
+        La dimensione visuale viene gestita dal CSS,
+        mentre il viewBox mantiene il sistema di coordinate.
+        */
+        svg.removeAttribute("width");
+        svg.removeAttribute("height");
+
+        svg.setAttribute(
+            "preserveAspectRatio",
+            "xMinYMin meet"
+        );
+
+        svg.style.display = "block";
+        svg.style.width = "100%";
+        svg.style.height = "auto";
+        svg.style.maxWidth = "none";
+
+        /*
+        Gli eventuali script contenuti nell'SVG inserito via
+        innerHTML non vengono eseguiti automaticamente.
+        Per un portfolio statico è preferibile così.
+        */
+
+        window.scrollTo({
+            top:0,
+            behavior:"smooth"
+        });
+
+    }
+    catch(error){
+
+        if(renderId !== currentRenderId){
+            return;
+        }
+
+        loading.style.display = "none";
+
+        svgViewer.innerHTML =
+        "<p style='padding:40px;text-align:center'>Unable to load SVG.</p>";
+
+        console.error(error);
+    }
+};
+
+/*
+HTML:
+manteniamo il caricamento dinamico per eventuali
+pagine Vimeo / contenuti HTML.
+*/
+window.loadHTML = async function(url){
+
+    const renderId = ++currentRenderId;
+
+    closeMobileMenu();
+    hideAllViewers();
+
+    htmlViewer.style.display = "block";
+    loading.style.display = "block";
+
+    try{
+
+        const response =
+            await fetch(url);
+
+        if(!response.ok){
+            throw new Error(
+                "HTTP error: " +
+                response.status
+            );
+        }
+
+        const pageHtml =
+            await response.text();
+
+        if(renderId !== currentRenderId){
+            return;
+        }
+
+        loading.style.display = "none";
+        htmlViewer.innerHTML = pageHtml;
 
         htmlViewer
         .querySelectorAll("script")
@@ -555,10 +705,12 @@ window.loadHTML = async function(url){
 
             [...oldScript.attributes]
                 .forEach(attribute => {
+
                     newScript.setAttribute(
                         attribute.name,
                         attribute.value
                     );
+
                 });
 
             newScript.textContent =
@@ -577,6 +729,10 @@ window.loadHTML = async function(url){
     }
     catch(error){
 
+        if(renderId !== currentRenderId){
+            return;
+        }
+
         loading.style.display = "none";
 
         htmlViewer.innerHTML =
@@ -584,6 +740,19 @@ window.loadHTML = async function(url){
 
         console.error(error);
     }
+};
+
+/*
+HOME:
+la home principale è ora un SVG.
+Se il nome è diverso, modifica solamente questa riga.
+*/
+window.loadHome = function(){
+
+    loadSVG(
+        "pdf/home.svg"
+    );
+
 };
 
 window.toggleMenu = function(){
@@ -608,9 +777,7 @@ document.addEventListener(
 "DOMContentLoaded",
 function(){
 
-    loadPDF(
-        "pdf/home.pdf"
-    );
+    loadHome();
 
 });
 
