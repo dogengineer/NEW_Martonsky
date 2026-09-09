@@ -1,6 +1,10 @@
-C:\php\php.exe -S localhost:8000
-
-
+Per Ciccio:
 python generate_site.py
 python -m http.server 8000
+
+Per Marty:
+python3 generate_site.py
+python3 -m http.server 8000
+
+Per aprire la pagina in locale:
 http://localhost:8000/
