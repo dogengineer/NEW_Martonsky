@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Martonsky</title>
 <link rel="icon" type="image/png" href="icons/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500&amp;display=swap" rel="stylesheet">
 
 <style>
 /* Martonsky-inspired UI skin. Viewer/rendering logic below is unchanged. */
@@ -14,7 +17,7 @@
     --muted:#999;
     --rule:#111;
     --menu-bg:#fff;
-    --ui-font:"Helvetica Neue",Helvetica,Arial,sans-serif;
+    --ui-font:"Playfair Display",Georgia,serif;
 }
 
 *{
@@ -74,11 +77,14 @@ header{
 
 nav{
     flex:1;
+    display:flex;
+    justify-content:flex-end;
 }
 
 nav>ul{
     display:flex;
     align-items:center;
+    justify-content:flex-end;
     gap:28px;
     list-style:none;
 }
@@ -113,6 +119,24 @@ nav a:hover,
 
 .top-menu-item{
     position:relative;
+}
+
+.top-menu-item>.menu-label{
+    display:inline-flex;
+    align-items:center;
+    gap:9px;
+}
+
+.top-menu-item>.menu-label::after{
+    content:"";
+    display:block;
+    width:8px;
+    height:8px;
+    margin-top:-4px;
+    border-right:1px solid currentColor;
+    border-bottom:1px solid currentColor;
+    transform:rotate(45deg);
+    transform-origin:center;
 }
 
 /* Desktop drop-downs: sharp white boxes with the thin black rule used
@@ -402,6 +426,110 @@ footer a:hover{
     cursor:pointer;
 }
 
+.search-button{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:42px;
+    height:42px;
+    margin-left:30px;
+    padding:0;
+    border:0;
+    background:transparent;
+    color:var(--ink);
+    cursor:pointer;
+    flex-shrink:0;
+}
+
+.search-button svg{
+    display:block;
+    width:29px;
+    height:29px;
+    stroke:currentColor;
+}
+
+.search-button:hover{
+    opacity:.48;
+}
+
+.search-panel{
+    display:none;
+    position:fixed;
+    inset:0;
+    z-index:10000;
+    padding:26px;
+    background:rgba(255,255,255,.98);
+}
+
+.search-panel.open{
+    display:block;
+}
+
+.search-close{
+    position:absolute;
+    top:24px;
+    right:28px;
+    border:0;
+    padding:4px;
+    background:transparent;
+    color:var(--ink);
+    font:300 34px/1 var(--ui-font);
+    cursor:pointer;
+}
+
+.search-box{
+    width:min(760px,calc(100% - 40px));
+    margin:13vh auto 0;
+}
+
+.search-box input{
+    display:block;
+    width:100%;
+    border:0;
+    border-bottom:1px solid var(--ink);
+    border-radius:0;
+    padding:12px 2px;
+    background:transparent;
+    color:var(--ink);
+    font:300 32px/1.25 var(--ui-font);
+    outline:0;
+}
+
+.search-box input::placeholder{
+    color:#999;
+    opacity:1;
+}
+
+.search-results{
+    width:100%;
+    margin-top:22px;
+    list-style:none;
+}
+
+.search-results li{
+    border-bottom:1px solid #e4e4e4;
+}
+
+.search-results button{
+    width:100%;
+    border:0;
+    padding:12px 2px;
+    background:transparent;
+    color:var(--ink);
+    font:400 14px/1.3 var(--ui-font);
+    text-align:left;
+    cursor:pointer;
+}
+
+.search-results button:hover{
+    opacity:.48;
+}
+
+.search-empty{
+    padding:14px 2px;
+    color:var(--muted);
+}
+
 .video-project{
     width:100%;
     max-width:1200px;
@@ -530,6 +658,10 @@ footer a:hover{
         display:none;
     }
 
+    .top-menu-item>.menu-label::after{
+        display:none;
+    }
+
     main{
         flex:1;
         display:flex;
@@ -550,6 +682,36 @@ footer a:hover{
 
     .video-project{
         padding:10px 12px 40px;
+    }
+
+    .search-button{
+        width:32px;
+        height:32px;
+        margin-left:auto;
+        margin-right:18px;
+    }
+
+    .search-button svg{
+        width:24px;
+        height:24px;
+    }
+
+    .search-panel{
+        padding:18px;
+    }
+
+    .search-close{
+        top:16px;
+        right:18px;
+    }
+
+    .search-box{
+        width:100%;
+        margin-top:12vh;
+    }
+
+    .search-box input{
+        font-size:25px;
     }
 
     #contactViewer{
@@ -626,6 +788,13 @@ footer a:hover{
 </ul>
 </nav>
 
+<button class="search-button" type="button" onclick="openSearch()" aria-label="Search">
+    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <circle cx="14" cy="14" r="9.5" stroke-width="1.8"></circle>
+        <path d="M21 21L29 29" stroke-width="1.8" stroke-linecap="round"></path>
+    </svg>
+</button>
+
 <button
 class="mobile-button"
 onclick="toggleMenu()"
@@ -634,6 +803,14 @@ aria-label="Menu">
 </button>
 
 </header>
+
+<div id="searchPanel" class="search-panel" role="dialog" aria-modal="true" aria-label="Search">
+    <button class="search-close" type="button" onclick="closeSearch()" aria-label="Close search">×</button>
+    <div class="search-box">
+        <input id="searchInput" type="search" placeholder="Search..." autocomplete="off" aria-label="Search site">
+        <ul id="searchResults" class="search-results"></ul>
+    </div>
+</div>
 
 <main>
 
@@ -693,6 +870,9 @@ const htmlViewer = document.getElementById("htmlViewer");
 const svgViewer = document.getElementById("svgViewer");
 const contactViewer = document.getElementById("contactViewer");
 const loading = document.getElementById("loading");
+const searchPanel = document.getElementById("searchPanel");
+const searchInput = document.getElementById("searchInput");
+const searchResults = document.getElementById("searchResults");
 
 let currentRenderId = 0;
 
@@ -1040,6 +1220,86 @@ window.toggleMenu = function(){
         .toggle("open");
 
 };
+
+function searchableLinks(){
+
+    return [...document.querySelectorAll("#mainMenu a")]
+        .map(link => ({
+            label:link.textContent.trim(),
+            link:link
+        }))
+        .filter(item => item.label);
+
+}
+
+function renderSearchResults(query){
+
+    const normalized = query.trim().toLocaleLowerCase();
+    searchResults.innerHTML = "";
+
+    if(!normalized){
+        return;
+    }
+
+    const matches = searchableLinks()
+        .filter(item => item.label.toLocaleLowerCase().includes(normalized));
+
+    if(matches.length === 0){
+        const empty = document.createElement("li");
+        empty.className = "search-empty";
+        empty.textContent = "No results";
+        searchResults.appendChild(empty);
+        return;
+    }
+
+    matches.forEach(item => {
+        const row = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = item.label;
+        button.addEventListener("click", function(){
+            closeSearch();
+            item.link.click();
+        });
+        row.appendChild(button);
+        searchResults.appendChild(row);
+    });
+
+}
+
+window.openSearch = function(){
+
+    closeMobileMenu();
+    searchPanel.classList.add("open");
+    document.body.style.overflow = "hidden";
+    searchInput.value = "";
+    searchResults.innerHTML = "";
+    window.setTimeout(() => searchInput.focus(),0);
+
+};
+
+window.closeSearch = function(){
+
+    searchPanel.classList.remove("open");
+    document.body.style.overflow = "";
+
+};
+
+searchInput.addEventListener("input", function(){
+    renderSearchResults(searchInput.value);
+});
+
+searchPanel.addEventListener("click", function(event){
+    if(event.target === searchPanel){
+        closeSearch();
+    }
+});
+
+document.addEventListener("keydown", function(event){
+    if(event.key === "Escape" && searchPanel.classList.contains("open")){
+        closeSearch();
+    }
+});
 
 window.closeMobileMenu = function(){
 
