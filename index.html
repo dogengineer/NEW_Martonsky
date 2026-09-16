@@ -256,12 +256,31 @@ main{
 
 #loading{
     display:none;
-    text-align:center;
-    padding:40px;
-    font-family:var(--ui-font);
-    font-size:12px;
-    font-weight:400;
-    width:100%;
+    position:fixed;
+    inset:0;
+    z-index:9999;
+    align-items:center;
+    justify-content:center;
+    pointer-events:none;
+}
+
+#loading.loading-visible{
+    display:flex;
+}
+
+.loading-spinner{
+    width:30px;
+    height:30px;
+    border:2px solid #d9d9d9;
+    border-top-color:#000;
+    border-radius:50%;
+    animation:loading-spin .7s linear infinite;
+}
+
+@keyframes loading-spin{
+    to{
+        transform:rotate(360deg);
+    }
 }
 
 footer{
@@ -496,6 +515,9 @@ footer a:hover{
 </ul></li>
 </ul></li>
 <li><a href="#" onclick="loadSVG(&quot;pdf/03_Artist Statement/02_Topo di plastica.svg&quot;);return false;">Artist Statement</a></li>
+<li><span class="menu-label empty-section">About</span></li>
+<li><span class="menu-label empty-section">CV</span></li>
+<li><span class="menu-label empty-section">Contact</span></li>
 <li><a href="#" onclick="loadHTML(&quot;pdf/07_Animations/01_Animations.html&quot;);return false;">Animations</a></li>
 </ul>
 </nav>
@@ -511,7 +533,7 @@ aria-label="Menu">
 
 <main>
 
-<div id="loading">Loading...</div>
+<div id="loading"><div class="loading-spinner" aria-label="Loading"></div></div>
 <div id="viewer"></div>
 <div id="htmlViewer"></div>
 <div id="svgViewer"></div>
@@ -564,7 +586,7 @@ window.loadPDF = async function(url){
     hideAllViewers();
 
     viewer.style.display = "block";
-    loading.style.display = "block";
+    loading.classList.add("loading-visible");
 
     try{
 
@@ -576,7 +598,7 @@ window.loadPDF = async function(url){
             return;
         }
 
-        loading.style.display = "none";
+        loading.classList.remove("loading-visible");
 
         const initialViewerWidth = viewer.clientWidth;
 
@@ -659,7 +681,7 @@ window.loadPDF = async function(url){
             return;
         }
 
-        loading.style.display = "none";
+        loading.classList.remove("loading-visible");
 
         viewer.innerHTML =
         "<p style='padding:40px;text-align:center'>Unable to load PDF.</p>";
@@ -676,7 +698,7 @@ window.loadSVG = async function(url){
     hideAllViewers();
 
     svgViewer.style.display = "block";
-    loading.style.display = "block";
+    loading.classList.add("loading-visible");
 
     try{
 
@@ -697,7 +719,7 @@ window.loadSVG = async function(url){
             return;
         }
 
-        loading.style.display = "none";
+        loading.classList.remove("loading-visible");
 
         svgViewer.innerHTML =
             svgText;
@@ -767,7 +789,7 @@ window.loadSVG = async function(url){
             return;
         }
 
-        loading.style.display = "none";
+        loading.classList.remove("loading-visible");
 
         svgViewer.innerHTML =
         "<p style='padding:40px;text-align:center'>Unable to load SVG.</p>";
@@ -784,7 +806,7 @@ window.loadHTML = async function(url){
     hideAllViewers();
 
     htmlViewer.style.display = "block";
-    loading.style.display = "block";
+    loading.classList.add("loading-visible");
 
     try{
 
@@ -805,7 +827,7 @@ window.loadHTML = async function(url){
             return;
         }
 
-        loading.style.display = "none";
+        loading.classList.remove("loading-visible");
         htmlViewer.innerHTML = pageHtml;
 
         htmlViewer
@@ -845,7 +867,7 @@ window.loadHTML = async function(url){
             return;
         }
 
-        loading.style.display = "none";
+        loading.classList.remove("loading-visible");
 
         htmlViewer.innerHTML =
         "<p style='padding:40px;text-align:center'>Unable to load HTML page.</p>";
