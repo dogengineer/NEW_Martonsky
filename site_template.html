@@ -236,6 +236,90 @@ main{
     display:none;
 }
 
+#contactViewer{
+    display:none;
+    width:100%;
+    align-self:stretch;
+    padding:54px 24px 80px;
+    background:var(--page);
+}
+
+.contact-page{
+    width:min(760px,100%);
+    margin:0 auto;
+}
+
+.contact-page h1{
+    margin:0 0 50px;
+    font-family:var(--ui-font);
+    font-size:42px;
+    font-weight:300;
+    line-height:1.15;
+    text-align:center;
+}
+
+.contact-form{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:22px 28px;
+}
+
+.contact-field-full,
+.contact-submit{
+    grid-column:1/-1;
+}
+
+.contact-form input,
+.contact-form textarea{
+    display:block;
+    width:100%;
+    border:0;
+    border-bottom:1px solid #d6d6d6;
+    border-radius:0;
+    padding:11px 0;
+    background:transparent;
+    color:var(--ink);
+    font:400 14px/1.4 var(--ui-font);
+    outline:0;
+}
+
+.contact-form textarea{
+    min-height:125px;
+    resize:vertical;
+}
+
+.contact-form input:focus,
+.contact-form textarea:focus{
+    border-bottom-color:var(--ink);
+}
+
+.contact-form input::placeholder,
+.contact-form textarea::placeholder{
+    color:#777;
+    opacity:1;
+}
+
+.contact-submit{
+    padding-top:13px;
+    text-align:center;
+}
+
+.contact-submit button{
+    min-width:116px;
+    border:1px solid var(--ink);
+    border-radius:0;
+    padding:11px 21px;
+    background:var(--ink);
+    color:#fff;
+    font:400 13px/1 var(--ui-font);
+    cursor:pointer;
+}
+
+.contact-submit button:hover{
+    background:#fff;
+    color:var(--ink);
+}
+
 #svgViewer{
     width:100%;
     background:var(--page);
@@ -468,6 +552,25 @@ footer a:hover{
         padding:10px 12px 40px;
     }
 
+    #contactViewer{
+        padding:38px 20px 60px;
+    }
+
+    .contact-page h1{
+        margin-bottom:34px;
+        font-size:32px;
+    }
+
+    .contact-form{
+        grid-template-columns:1fr;
+        gap:18px;
+    }
+
+    .contact-field-full,
+    .contact-submit{
+        grid-column:1;
+    }
+
     footer{
         padding:14px 18px 16px;
         font-size:10px;
@@ -491,6 +594,7 @@ footer a:hover{
 <nav id="mainMenu">
 <ul>
 {{NAVIGATION}}
+<li><a href="#" onclick="loadContact();return false;">CONTACT</a></li>
 </ul>
 </nav>
 
@@ -509,6 +613,31 @@ aria-label="Menu">
 <div id="viewer"></div>
 <div id="htmlViewer"></div>
 <div id="svgViewer"></div>
+<section id="contactViewer" aria-labelledby="contactTitle">
+    <div class="contact-page">
+        <h1 id="contactTitle">Contact Martonsky</h1>
+        <form action="https://formspree.io/f/xvodvbag" method="POST" class="contact-form">
+            <div>
+                <input type="text" name="first-name" id="first-name" placeholder="First Name" autocomplete="given-name">
+            </div>
+            <div>
+                <input type="text" name="last-name" id="last-name" placeholder="Last Name" autocomplete="family-name">
+            </div>
+            <div>
+                <input type="email" name="email" id="email" placeholder="Email Address" autocomplete="email" required>
+            </div>
+            <div>
+                <input type="text" name="subject" id="subject" placeholder="Subject">
+            </div>
+            <div class="contact-field-full">
+                <textarea name="message" id="message" placeholder="Type Your Message Here ..." required></textarea>
+            </div>
+            <div class="contact-submit">
+                <button type="submit">Send now</button>
+            </div>
+        </form>
+    </div>
+</section>
 
 </main>
 
@@ -534,6 +663,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 const viewer = document.getElementById("viewer");
 const htmlViewer = document.getElementById("htmlViewer");
 const svgViewer = document.getElementById("svgViewer");
+const contactViewer = document.getElementById("contactViewer");
 const loading = document.getElementById("loading");
 
 let currentRenderId = 0;
@@ -543,6 +673,7 @@ function hideAllViewers(){
     viewer.style.display = "none";
     htmlViewer.style.display = "none";
     svgViewer.style.display = "none";
+    contactViewer.style.display = "none";
 
     viewer.innerHTML = "";
     htmlViewer.innerHTML = "";
@@ -846,6 +977,23 @@ window.loadHTML = async function(url){
 
         console.error(error);
     }
+};
+
+window.loadContact = function(){
+
+    ++currentRenderId;
+
+    closeMobileMenu();
+    hideAllViewers();
+    loading.classList.remove("loading-visible");
+
+    contactViewer.style.display = "block";
+
+    window.scrollTo({
+        top:0,
+        behavior:"smooth"
+    });
+
 };
 
 window.loadHome = function(){
