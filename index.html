@@ -604,11 +604,12 @@ footer a:hover{
     }
 
     nav>ul>li{
-        margin-bottom:10px;
+        margin:0;
+        border-bottom:1px solid #dedede;
     }
 
     nav>ul>li:last-child{
-        margin-bottom:0;
+        border-bottom:0;
     }
 
     nav a,
@@ -619,13 +620,18 @@ footer a:hover{
     }
 
     .submenu{
-        display:block;
+        display:none;
         position:static;
         min-width:0;
-        margin:5px 0 2px 0;
-        padding:0 0 0 14px;
+        margin:0;
+        padding:3px 0 10px 15px;
         border:0;
         background:transparent;
+    }
+
+    .top-menu-item.mobile-expanded>.submenu,
+    .has-submenu.mobile-expanded>.submenu{
+        display:block;
     }
 
     .submenu::before{
@@ -633,10 +639,10 @@ footer a:hover{
     }
 
     .submenu li>.submenu{
-        display:block;
+        display:none;
         position:static;
-        margin:2px 0 0 0;
-        padding:0 0 0 14px;
+        margin:0;
+        padding:2px 0 5px 14px;
         border:0;
     }
 
@@ -644,8 +650,18 @@ footer a:hover{
     .submenu-label,
     .empty-item{
         min-width:0;
-        padding:3px 0;
+        padding:6px 12px 6px 0;
         background:transparent;
+    }
+
+    nav>ul>li>a,
+    nav>ul>li>.menu-label,
+    nav>ul>li>.empty-section{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        width:100%;
+        padding:11px 2px;
     }
 
     .submenu a:hover,
@@ -655,11 +671,24 @@ footer a:hover{
     }
 
     .arrow{
-        display:none;
+        display:block;
+        margin-left:20px;
+        transition:transform .2s ease;
+    }
+
+    .has-submenu.mobile-expanded>.submenu-label .arrow{
+        transform:rotate(90deg);
     }
 
     .top-menu-item>.menu-label::after{
-        display:none;
+        display:block;
+        margin-right:3px;
+        transition:transform .2s ease;
+    }
+
+    .top-menu-item.mobile-expanded>.menu-label::after{
+        transform:rotate(225deg);
+        margin-top:4px;
     }
 
     main{
@@ -1214,12 +1243,60 @@ window.loadHome = function(){
 
 window.toggleMenu = function(){
 
-    document
-        .getElementById("mainMenu")
-        .classList
-        .toggle("open");
+    const menu = document.getElementById("mainMenu");
+    menu.classList.toggle("open");
+
+    if(!menu.classList.contains("open")){
+        closeMobileAccordions();
+    }
 
 };
+
+function closeMobileAccordions(){
+
+    document
+        .querySelectorAll("#mainMenu .mobile-expanded")
+        .forEach(item => item.classList.remove("mobile-expanded"));
+
+}
+
+function setupMobileAccordion(){
+
+    document
+        .querySelectorAll("#mainMenu .menu-label, #mainMenu .submenu-label")
+        .forEach(label => {
+            label.setAttribute("role","button");
+            label.setAttribute("tabindex","0");
+
+            const toggle = function(event){
+                if(!window.matchMedia("(max-width:800px)").matches){
+                    return;
+                }
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                const item = label.parentElement;
+                const willOpen = !item.classList.contains("mobile-expanded");
+
+                [...item.parentElement.children].forEach(sibling => {
+                    if(sibling !== item){
+                        sibling.classList.remove("mobile-expanded");
+                    }
+                });
+
+                item.classList.toggle("mobile-expanded",willOpen);
+            };
+
+            label.addEventListener("click",toggle);
+            label.addEventListener("keydown",event => {
+                if(event.key === "Enter" || event.key === " "){
+                    toggle(event);
+                }
+            });
+        });
+
+}
 
 function searchableLinks(){
 
@@ -1308,12 +1385,15 @@ window.closeMobileMenu = function(){
         .classList
         .remove("open");
 
+    closeMobileAccordions();
+
 };
 
 document.addEventListener(
 "DOMContentLoaded",
 function(){
 
+    setupMobileAccordion();
     loadHome();
 
 });
