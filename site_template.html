@@ -513,22 +513,45 @@ footer a:hover{
 }
 
 .search-panel{
-    display:none;
     position:fixed;
     inset:0;
     z-index:10000;
-    padding:26px;
-    background:rgba(255,255,255,.98);
+    background:rgba(0,0,0,0);
+    visibility:hidden;
+    pointer-events:none;
+    transition:background .34s ease,visibility 0s linear .42s;
 }
 
 .search-panel.open{
-    display:block;
+    background:rgba(0,0,0,.16);
+    visibility:visible;
+    pointer-events:auto;
+    transition:background .34s ease,visibility 0s;
+}
+
+.search-drawer{
+    position:absolute;
+    top:0;
+    right:0;
+    bottom:0;
+    width:min(440px,calc(100vw - 56px));
+    padding:94px 32px 34px;
+    overflow-y:auto;
+    background:rgba(255,255,255,.985);
+    border-left:1px solid rgba(17,17,17,.18);
+    box-shadow:-18px 0 42px rgba(0,0,0,.10);
+    transform:translateX(105%);
+    transition:transform .48s cubic-bezier(.22,.78,.2,1);
+}
+
+.search-panel.open .search-drawer{
+    transform:translateX(0);
 }
 
 .search-close{
     position:absolute;
     top:24px;
-    right:28px;
+    right:24px;
     border:0;
     padding:4px;
     background:transparent;
@@ -538,8 +561,8 @@ footer a:hover{
 }
 
 .search-box{
-    width:min(760px,calc(100% - 40px));
-    margin:13vh auto 0;
+    width:100%;
+    margin:0;
 }
 
 .search-box input{
@@ -551,7 +574,7 @@ footer a:hover{
     padding:12px 2px;
     background:transparent;
     color:var(--ink);
-    font:300 32px/1.25 var(--ui-font);
+    font:300 27px/1.25 var(--ui-font);
     outline:0;
 }
 
@@ -786,7 +809,16 @@ footer a:hover{
     }
 
     .search-panel{
-        padding:18px;
+        background:rgba(0,0,0,0);
+    }
+
+    .search-panel.open{
+        background:rgba(0,0,0,.13);
+    }
+
+    .search-drawer{
+        width:calc(100vw - 22px);
+        padding:82px 24px 28px;
     }
 
     .search-close{
@@ -796,7 +828,7 @@ footer a:hover{
 
     .search-box{
         width:100%;
-        margin-top:12vh;
+        margin:0;
     }
 
     .search-box input{
@@ -866,10 +898,12 @@ aria-label="Menu">
 </header>
 
 <div id="searchPanel" class="search-panel" role="dialog" aria-modal="true" aria-label="Search">
-    <button class="search-close" type="button" onclick="closeSearch()" aria-label="Close search">×</button>
-    <div class="search-box">
-        <input id="searchInput" type="search" placeholder="Search..." autocomplete="off" aria-label="Search site">
-        <ul id="searchResults" class="search-results"></ul>
+    <div class="search-drawer">
+        <button class="search-close" type="button" onclick="closeSearch()" aria-label="Close search">×</button>
+        <div class="search-box">
+            <input id="searchInput" type="search" placeholder="Search..." autocomplete="off" aria-label="Search site">
+            <ul id="searchResults" class="search-results"></ul>
+        </div>
     </div>
 </div>
 
