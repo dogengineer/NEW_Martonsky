@@ -234,6 +234,39 @@ main{
     justify-content:center;
     align-items:center;
     background:var(--page);
+    perspective:1400px;
+}
+
+.project-curtain-enter{
+    transform-origin:50% 0;
+    backface-visibility:hidden;
+    animation:projectCurtainDown .82s cubic-bezier(.18,.78,.2,1) both;
+}
+
+@keyframes projectCurtainDown{
+    0%{
+        opacity:0;
+        clip-path:inset(0 0 100% 0);
+        transform:translateY(-34px) rotateX(-16deg) scaleY(.94);
+        filter:brightness(.82);
+    }
+    58%{
+        opacity:1;
+        transform:translateY(3px) rotateX(2.2deg) scaleY(1.01);
+        filter:brightness(1.03);
+    }
+    100%{
+        opacity:1;
+        clip-path:inset(0 0 0 0);
+        transform:translateY(0) rotateX(0) scaleY(1);
+        filter:brightness(1);
+    }
+}
+
+@media(prefers-reduced-motion:reduce){
+    .project-curtain-enter{
+        animation:none;
+    }
 }
 
 #viewer{
@@ -876,6 +909,16 @@ const searchInput = document.getElementById("searchInput");
 const searchResults = document.getElementById("searchResults");
 
 let currentRenderId = 0;
+let searchIndexPromise = null;
+let searchRequestId = 0;
+
+function revealProject(element){
+
+    element.classList.remove("project-curtain-enter");
+    void element.offsetWidth;
+    element.classList.add("project-curtain-enter");
+
+}
 
 function hideAllViewers(){
 
@@ -887,6 +930,9 @@ function hideAllViewers(){
     viewer.innerHTML = "";
     htmlViewer.innerHTML = "";
     svgViewer.innerHTML = "";
+
+    [viewer,htmlViewer,svgViewer,contactViewer]
+        .forEach(element => element.classList.remove("project-curtain-enter"));
 
 }
 
@@ -909,8 +955,6 @@ window.loadPDF = async function(url){
         if(renderId !== currentRenderId){
             return;
         }
-
-        loading.classList.remove("loading-visible");
 
         const initialViewerWidth = viewer.clientWidth;
 
@@ -986,6 +1030,9 @@ window.loadPDF = async function(url){
             }).promise;
         }
 
+        loading.classList.remove("loading-visible");
+        revealProject(viewer);
+
     }
     catch(error){
 
@@ -1030,8 +1077,6 @@ window.loadSVG = async function(url){
         if(renderId !== currentRenderId){
             return;
         }
-
-        loading.classList.remove("loading-visible");
 
         svgViewer.innerHTML =
             svgText;
@@ -1089,6 +1134,9 @@ window.loadSVG = async function(url){
 
         svgViewer.scrollLeft = 0;
 
+        loading.classList.remove("loading-visible");
+        revealProject(svgViewer);
+
         window.scrollTo({
             top:0,
             behavior:"smooth"
@@ -1139,7 +1187,6 @@ window.loadHTML = async function(url){
             return;
         }
 
-        loading.classList.remove("loading-visible");
         htmlViewer.innerHTML = pageHtml;
 
         htmlViewer
@@ -1166,6 +1213,9 @@ window.loadHTML = async function(url){
                 newScript
             );
         });
+
+        loading.classList.remove("loading-visible");
+        revealProject(htmlViewer);
 
         window.scrollTo({
             top:0,
@@ -1275,23 +1325,96 @@ function searchableLinks(){
     return [...document.querySelectorAll("#mainMenu a")]
         .map(link => ({
             label:link.textContent.trim(),
-            link:link
+            link:link,
+            svgUrl:extractSvgUrl(link)
         }))
         .filter(item => item.label);
 
 }
 
-function renderSearchResults(query){
+function extractSvgUrl(link){
 
-    const normalized = query.trim().toLocaleLowerCase();
+    const handler = link.getAttribute("onclick") || "";
+    const match = handler.match(/loadSVG\(\s*(["'])(.*?)\1\s*\)/);
+    return match ? match[2] : null;
+
+}
+
+function normalizeSearchText(value){
+
+    return value
+        .replace(/\s+/g," ")
+        .trim()
+        .toLocaleLowerCase();
+
+}
+
+function buildSearchIndex(){
+
+    if(searchIndexPromise){
+        return searchIndexPromise;
+    }
+
+    const items = searchableLinks();
+
+    searchIndexPromise = Promise.all(items.map(async item => {
+        let svgContent = "";
+
+        if(item.svgUrl){
+            try{
+                const response = await fetch(item.svgUrl);
+                if(response.ok){
+                    const source = await response.text();
+                    const documentSvg = new DOMParser()
+                        .parseFromString(source,"image/svg+xml");
+
+                    svgContent = [
+                        ...documentSvg.querySelectorAll("text, title, desc, metadata")
+                    ]
+                    .map(node => node.textContent || "")
+                    .join(" ");
+                }
+            }
+            catch(error){
+                console.warn("Unable to index SVG:",item.svgUrl,error);
+            }
+        }
+
+        return {
+            ...item,
+            searchableText:normalizeSearchText(item.label + " " + svgContent)
+        };
+    }));
+
+    return searchIndexPromise;
+
+}
+
+async function renderSearchResults(query){
+
+    const requestId = ++searchRequestId;
+    const normalized = normalizeSearchText(query);
     searchResults.innerHTML = "";
 
     if(!normalized){
         return;
     }
 
-    const matches = searchableLinks()
-        .filter(item => item.label.toLocaleLowerCase().includes(normalized));
+    const loadingRow = document.createElement("li");
+    loadingRow.className = "search-empty";
+    loadingRow.textContent = "Searching…";
+    searchResults.appendChild(loadingRow);
+
+    const index = await buildSearchIndex();
+
+    if(requestId !== searchRequestId){
+        return;
+    }
+
+    searchResults.innerHTML = "";
+
+    const matches = index
+        .filter(item => item.searchableText.includes(normalized));
 
     if(matches.length === 0){
         const empty = document.createElement("li");
@@ -1323,6 +1446,7 @@ window.openSearch = function(){
     document.body.style.overflow = "hidden";
     searchInput.value = "";
     searchResults.innerHTML = "";
+    buildSearchIndex();
     window.setTimeout(() => searchInput.focus(),0);
 
 };
