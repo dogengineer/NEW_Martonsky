@@ -243,6 +243,32 @@ main{
     animation:projectCurtainDown .82s cubic-bezier(.18,.78,.2,1) both;
 }
 
+/* Video and iframe pages use a gentler reveal: no 3D rotation, so moving
+   imagery stays visually stable while the page opens from the top. */
+.animation-page-enter{
+    transform-origin:50% 0;
+    animation:animationPageDown .68s cubic-bezier(.22,.72,.22,1) both;
+}
+
+@keyframes animationPageDown{
+    0%{
+        opacity:0;
+        clip-path:inset(0 0 100% 0);
+        transform:translateY(-18px);
+        filter:blur(1.5px);
+    }
+    65%{
+        opacity:1;
+        filter:blur(0);
+    }
+    100%{
+        opacity:1;
+        clip-path:inset(0 0 0 0);
+        transform:translateY(0);
+        filter:none;
+    }
+}
+
 @keyframes projectCurtainDown{
     0%{
         opacity:0;
@@ -264,7 +290,8 @@ main{
 }
 
 @media(prefers-reduced-motion:reduce){
-    .project-curtain-enter{
+    .project-curtain-enter,
+    .animation-page-enter{
         animation:none;
     }
 }
@@ -914,9 +941,17 @@ let searchRequestId = 0;
 
 function revealProject(element){
 
-    element.classList.remove("project-curtain-enter");
+    element.classList.remove("project-curtain-enter","animation-page-enter");
     void element.offsetWidth;
     element.classList.add("project-curtain-enter");
+
+}
+
+function revealAnimationPage(element){
+
+    element.classList.remove("project-curtain-enter","animation-page-enter");
+    void element.offsetWidth;
+    element.classList.add("animation-page-enter");
 
 }
 
@@ -932,7 +967,10 @@ function hideAllViewers(){
     svgViewer.innerHTML = "";
 
     [viewer,htmlViewer,svgViewer,contactViewer]
-        .forEach(element => element.classList.remove("project-curtain-enter"));
+        .forEach(element => element.classList.remove(
+            "project-curtain-enter",
+            "animation-page-enter"
+        ));
 
 }
 
@@ -1215,7 +1253,7 @@ window.loadHTML = async function(url){
         });
 
         loading.classList.remove("loading-visible");
-        revealProject(htmlViewer);
+        revealAnimationPage(htmlViewer);
 
         window.scrollTo({
             top:0,
