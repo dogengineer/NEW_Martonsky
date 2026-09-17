@@ -234,7 +234,6 @@ main{
     justify-content:center;
     align-items:center;
     background:var(--page);
-    perspective:1400px;
 }
 
 .project-curtain-enter{
@@ -273,18 +272,18 @@ main{
     0%{
         opacity:0;
         clip-path:inset(0 0 100% 0);
-        transform:translateY(-34px) rotateX(-16deg) scaleY(.94);
+        transform:perspective(1400px) translateY(-34px) rotateX(-16deg) scaleY(.94);
         filter:brightness(.82);
     }
     58%{
         opacity:1;
-        transform:translateY(3px) rotateX(2.2deg) scaleY(1.01);
+        transform:perspective(1400px) translateY(3px) rotateX(2.2deg) scaleY(1.01);
         filter:brightness(1.03);
     }
     100%{
         opacity:1;
         clip-path:inset(0 0 0 0);
-        transform:translateY(0) rotateX(0) scaleY(1);
+        transform:perspective(1400px) translateY(0) rotateX(0) scaleY(1);
         filter:brightness(1);
     }
 }
@@ -318,6 +317,10 @@ main{
     width:100%;
     background:var(--page);
     display:none;
+}
+
+#htmlViewer.content-loading{
+    visibility:hidden;
 }
 
 #contactViewer{
@@ -999,6 +1002,7 @@ function hideAllViewers(){
     viewer.innerHTML = "";
     htmlViewer.innerHTML = "";
     svgViewer.innerHTML = "";
+    htmlViewer.classList.remove("content-loading");
 
     [viewer,htmlViewer,svgViewer,contactViewer]
         .forEach(element => element.classList.remove(
@@ -1230,6 +1234,46 @@ window.loadSVG = async function(url){
     }
 };
 
+function waitForEmbeddedContent(container,timeoutMs = 8000){
+
+    const allElements = [
+        ...container.querySelectorAll("iframe, video, img")
+    ];
+
+    const elementsInFirstView = allElements.filter(element =>
+        element.getBoundingClientRect().top < window.innerHeight * 1.25
+    );
+
+    const elements = elementsInFirstView.length
+        ? elementsInFirstView
+        : allElements.slice(0,1);
+
+    if(elements.length === 0){
+        return Promise.resolve();
+    }
+
+    const pending = elements.map(element => new Promise(resolve => {
+        if(
+            (element.tagName === "IMG" && element.complete) ||
+            (element.tagName === "VIDEO" && element.readyState >= 2)
+        ){
+            resolve();
+            return;
+        }
+
+        const finish = () => resolve();
+        element.addEventListener("load",finish,{once:true});
+        element.addEventListener("loadeddata",finish,{once:true});
+        element.addEventListener("error",finish,{once:true});
+    }));
+
+    return Promise.race([
+        Promise.all(pending),
+        new Promise(resolve => window.setTimeout(resolve,timeoutMs))
+    ]);
+
+}
+
 window.loadHTML = async function(url){
 
     const renderId = ++currentRenderId;
@@ -1238,6 +1282,7 @@ window.loadHTML = async function(url){
     hideAllViewers();
 
     htmlViewer.style.display = "block";
+    htmlViewer.classList.add("content-loading");
     loading.classList.add("loading-visible");
 
     try{
@@ -1260,6 +1305,9 @@ window.loadHTML = async function(url){
         }
 
         htmlViewer.innerHTML = pageHtml;
+
+        const embeddedContentReady =
+            waitForEmbeddedContent(htmlViewer);
 
         htmlViewer
         .querySelectorAll("script")
@@ -1286,7 +1334,14 @@ window.loadHTML = async function(url){
             );
         });
 
+        await embeddedContentReady;
+
+        if(renderId !== currentRenderId){
+            return;
+        }
+
         loading.classList.remove("loading-visible");
+        htmlViewer.classList.remove("content-loading");
         revealAnimationPage(htmlViewer);
 
         window.scrollTo({
@@ -1302,6 +1357,7 @@ window.loadHTML = async function(url){
         }
 
         loading.classList.remove("loading-visible");
+        htmlViewer.classList.remove("content-loading");
 
         htmlViewer.innerHTML =
         "<p style='padding:40px;text-align:center'>Unable to load HTML page.</p>";
