@@ -2,11 +2,18 @@ from pathlib import Path
 import html
 import re
 import json
+import hashlib
 import xml.etree.ElementTree as ET
+
+try:
+    import pymupdf as fitz  # PDF text, image and layout analysis
+except ImportError:
+    fitz = None
 
 BASE_DIR = Path("pdf")
 TEMPLATE_FILE = Path("site_template.html")
 OUTPUT_FILE = Path("index.html")
+PDF_ASSETS_DIR = Path("_generated_pdf_assets")
 
 SUPPORTED_EXTENSIONS = {".pdf", ".html", ".htm", ".svg"}
 
@@ -48,6 +55,62 @@ SVG_ZOOM_CSS = r"""
     margin:0 !important;
     background:#fff;
     overflow:hidden;
+}
+
+.pdf-page-shell,
+.pdf-column-shell{
+    position:relative;
+    overflow:hidden;
+    margin-left:auto;
+    margin-right:auto;
+    background:#fff;
+}
+
+.pdf-column-list{
+    display:flex;
+    flex-direction:column;
+    gap:28px;
+    width:100%;
+    box-sizing:border-box;
+    padding:18px clamp(14px,4vw,24px) 32px;
+    background:#fff;
+}
+
+.pdf-image-hotspot{
+    position:absolute;
+    z-index:3;
+    display:block;
+    border:0;
+    padding:0;
+    background:transparent;
+    cursor:zoom-in;
+}
+
+.pdf-link-hotspot{
+    position:absolute;
+    z-index:4;
+    display:block;
+    background:transparent;
+}
+
+.pdf-link-hotspot:focus-visible{
+    outline:2px solid #111;
+    outline-offset:2px;
+}
+
+.pdf-image-hotspot:focus-visible{
+    outline:2px solid #111;
+    outline-offset:2px;
+}
+
+.pdf-accessible-text{
+    position:absolute;
+    width:1px;
+    height:1px;
+    overflow:hidden;
+    clip:rect(0 0 0 0);
+    clip-path:inset(50%);
+    white-space:nowrap;
 }
 
 #svgImageLightbox{
@@ -111,6 +174,14 @@ SVG_ZOOM_CSS = r"""
 @media(max-width:800px){
     .mobile-svg-columns{
         gap:22px;
+    }
+
+    #viewer{
+        overflow-x:hidden;
+    }
+
+    .pdf-column-list{
+        gap:24px;
     }
 
     #svgImageLightbox{
@@ -428,7 +499,12 @@ SVG_ZOOM_JS = r"""
     }
 
     function imageSource(image){
+        if(typeof image === "string"){
+            return image;
+        }
+
         return (
+            image.getAttribute("src") ||
             image.getAttribute("href") ||
             image.getAttributeNS("http://www.w3.org/1999/xlink","href") ||
             ""
@@ -444,7 +520,10 @@ SVG_ZOOM_JS = r"""
 
         const enlargedImage = document.createElement("img");
         enlargedImage.src = source;
-        enlargedImage.alt = image.getAttribute("aria-label") || "Enlarged project image";
+        enlargedImage.alt =
+            typeof image === "string"
+            ? "Enlarged project image"
+            : image.getAttribute("aria-label") || "Enlarged project image";
         enlargedImage.decoding = "async";
 
         lightboxContent.replaceChildren(enlargedImage);
@@ -453,6 +532,8 @@ SVG_ZOOM_JS = r"""
         lightbox.classList.add("open");
         closeButton.focus({preventScroll:true});
     }
+
+    window.openProjectImage = openLightbox;
 
     function prepareSvg(svg){
         if(svg.dataset.zoomReady === "true"){
@@ -812,7 +893,194 @@ def analyze_svg_images():
 
     return manifest
 
-def inject_svg_zoom(template: str, manifest) -> str:
+def _pdf_rect_values(rect):
+    return [
+        round(float(rect.x0), 3),
+        round(float(rect.y0), 3),
+        round(float(rect.x1), 3),
+        round(float(rect.y1), 3),
+    ]
+
+def detect_pdf_columns(page_width, page_height, rectangles, has_text):
+    """Find clear vertical columns from whitespace between PDF elements."""
+    if not has_text or page_width / max(page_height, 1) < 1.15:
+        return []
+
+    intervals = []
+    for rect in rectangles:
+        x0 = max(0.0, min(page_width, float(rect.x0)))
+        x1 = max(0.0, min(page_width, float(rect.x1)))
+        if x1 - x0 >= page_width * 0.025:
+            intervals.append([x0, x1])
+
+    intervals.sort(key=lambda item: (item[0], item[1]))
+    if len(intervals) < 3:
+        return []
+
+    join_tolerance = page_width * 0.006
+    groups = []
+    for x0, x1 in intervals:
+        if not groups or x0 > groups[-1][1] + join_tolerance:
+            groups.append([x0, x1])
+        else:
+            groups[-1][1] = max(groups[-1][1], x1)
+
+    groups = [
+        group for group in groups
+        if group[1] - group[0] >= page_width * 0.12
+    ]
+
+    if not 2 <= len(groups) <= 4:
+        return []
+
+    minimum_gap = page_width * 0.018
+    if any(
+        groups[index + 1][0] - groups[index][1] < minimum_gap
+        for index in range(len(groups) - 1)
+    ):
+        return []
+
+    padding = page_width * 0.012
+    columns = []
+    for x0, x1 in groups:
+        left = max(0.0, x0 - padding)
+        right = min(page_width, x1 + padding)
+        columns.append({
+            "x": round(left, 3),
+            "y": 0.0,
+            "width": round(right - left, 3),
+            "height": round(page_height, 3),
+        })
+
+    return columns
+
+def _pdf_asset_folder(pdf_path):
+    relative = pdf_path.relative_to(BASE_DIR).as_posix()
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(relative).stem).strip("-")
+    digest = hashlib.sha1(relative.encode("utf-8")).hexdigest()[:8]
+    return PDF_ASSETS_DIR / f"{stem or 'project'}-{digest}"
+
+def analyze_pdf_projects():
+    """Extract searchable text, image assets and mobile columns from PDFs."""
+    manifest = {}
+
+    if not BASE_DIR.is_dir():
+        return manifest
+
+    pdf_files = sorted(
+        BASE_DIR.rglob("*.pdf"),
+        key=lambda path: path.as_posix().lower(),
+    )
+
+    if pdf_files and fitz is None:
+        print(
+            "ATTENZIONE: PyMuPDF non installato. "
+            "Esegui: python3 -m pip install pymupdf"
+        )
+        return manifest
+
+    for pdf_path in pdf_files:
+        url = pdf_path.as_posix()
+        asset_folder = _pdf_asset_folder(pdf_path)
+        asset_folder.mkdir(parents=True, exist_ok=True)
+
+        try:
+            document = fitz.open(pdf_path)
+            pages = []
+            all_text = []
+            extracted_assets = {}
+
+            for page_index, page in enumerate(document):
+                page_width = float(page.rect.width)
+                page_height = float(page.rect.height)
+                page_text = page.get_text("text").strip()
+                if page_text:
+                    all_text.append(page_text)
+
+                text_rectangles = []
+                for block in page.get_text("blocks"):
+                    if len(block) > 6 and block[6] == 0 and str(block[4]).strip():
+                        text_rectangles.append(fitz.Rect(block[:4]))
+
+                images = []
+                image_rectangles = []
+                for image_number, image_info in enumerate(
+                    page.get_image_info(xrefs=True),
+                    start=1,
+                ):
+                    bbox = fitz.Rect(image_info["bbox"])
+                    if bbox.width <= 1 or bbox.height <= 1:
+                        continue
+
+                    image_rectangles.append(bbox)
+                    xref = int(image_info.get("xref") or 0)
+                    asset_url = ""
+
+                    if xref > 0:
+                        if xref not in extracted_assets:
+                            extracted = document.extract_image(xref)
+                            extension = extracted.get("ext", "png")
+                            asset_path = asset_folder / f"xref-{xref}.{extension}"
+                            asset_path.write_bytes(extracted["image"])
+                            extracted_assets[xref] = asset_path.as_posix()
+                        asset_url = extracted_assets[xref]
+
+                    images.append({
+                        "bbox": _pdf_rect_values(bbox),
+                        "asset": asset_url,
+                        "label": f"Enlarge image {image_number}",
+                    })
+
+                columns = detect_pdf_columns(
+                    page_width,
+                    page_height,
+                    text_rectangles + image_rectangles,
+                    bool(page_text),
+                )
+
+                links = []
+                for target in sorted(set(re.findall(
+                    r"https?://[^\s\]\)>]+",
+                    page_text,
+                    flags=re.I,
+                ))):
+                    for link_rect in page.search_for(target):
+                        links.append({
+                            "bbox": _pdf_rect_values(link_rect),
+                            "url": target,
+                            "label": f"Open link {target}",
+                        })
+
+                pages.append({
+                    "page": page_index + 1,
+                    "width": round(page_width, 3),
+                    "height": round(page_height, 3),
+                    "columns": columns,
+                    "images": images,
+                    "links": links,
+                    "text": page_text,
+                })
+
+            document.close()
+            manifest[url] = {
+                "text": "\n".join(all_text),
+                "pages": pages,
+                "images": sum(len(page["images"]) for page in pages),
+                "column_pages": sum(bool(page["columns"]) for page in pages),
+            }
+
+        except Exception as error:
+            manifest[url] = {
+                "text": "",
+                "pages": [],
+                "images": 0,
+                "column_pages": 0,
+                "error": str(error),
+            }
+
+    return manifest
+
+def inject_project_runtime(template: str, svg_manifest, pdf_manifest) -> str:
     """Inject the reusable lightbox without modifying the source SVG files."""
     marker = "Automatic SVG image zoom, injected by generate_site.py"
 
@@ -827,7 +1095,9 @@ def inject_svg_zoom(template: str, manifest) -> str:
 
     manifest_script = (
         "<script>window.SVG_IMAGE_MANIFEST = "
-        + json.dumps(manifest, ensure_ascii=False)
+        + json.dumps(svg_manifest, ensure_ascii=False)
+        + ";window.PDF_PROJECT_MANIFEST = "
+        + json.dumps(pdf_manifest, ensure_ascii=False)
         + ";</script>"
     )
 
@@ -855,6 +1125,7 @@ def main():
     template = TEMPLATE_FILE.read_text(encoding="utf-8")
     navigation = render_navigation()
     svg_manifest = analyze_svg_images()
+    pdf_manifest = analyze_pdf_projects()
 
     if "{{NAVIGATION}}" not in template:
         raise RuntimeError(
@@ -862,7 +1133,7 @@ def main():
         )
 
     output = template.replace("{{NAVIGATION}}", navigation)
-    output = inject_svg_zoom(output, svg_manifest)
+    output = inject_project_runtime(output, svg_manifest, pdf_manifest)
     OUTPUT_FILE.write_text(output, encoding="utf-8")
 
     print(f"Creato {OUTPUT_FILE}")
@@ -892,6 +1163,29 @@ def main():
                 f"({info['embedded']} incorporate, "
                 f"{info['external']} esterne; {zoom_status})"
             )
+
+    pdf_image_count = sum(item["images"] for item in pdf_manifest.values())
+    pdf_column_pages = sum(
+        item["column_pages"] for item in pdf_manifest.values()
+    )
+    pdf_error_count = sum("error" in item for item in pdf_manifest.values())
+
+    print(f"PDF analizzati: {len(pdf_manifest)}")
+    print(f"Immagini PDF estraibili: {pdf_image_count}")
+    print(f"Pagine PDF con colonne mobili: {pdf_column_pages}")
+
+    if pdf_error_count:
+        print(f"PDF non analizzati per errore: {pdf_error_count}")
+
+    for pdf_path, info in pdf_manifest.items():
+        status = (
+            f"{info['column_pages']} pagine a colonne"
+            if info["column_pages"]
+            else "layout mobile standard"
+        )
+        print(
+            f"  - {pdf_path}: {info['images']} immagini; {status}"
+        )
 
 if __name__ == "__main__":
     main()

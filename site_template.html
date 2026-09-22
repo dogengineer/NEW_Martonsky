@@ -1070,115 +1070,200 @@ function hideAllViewers(){
 
 }
 
-window.loadPDF = async function(url){
+function pdfProjectData(url){
+    const manifest = window.PDF_PROJECT_MANIFEST || {};
+    const cleanUrl = url.split("#")[0].split("?")[0];
+    return manifest[cleanUrl] || manifest[decodeURI(cleanUrl)] || null;
+}
 
+function rectanglesIntersect(first,second){
+    return first[0] < second.x + second.width &&
+        first[2] > second.x &&
+        first[1] < second.y + second.height &&
+        first[3] > second.y;
+}
+
+function addPdfImageHotspots(shell,pageData,region){
+    if(!pageData){
+        return;
+    }
+
+    if((pageData.text || "").trim()){
+        (pageData.images || []).forEach(image => {
+        if(!image.asset || !rectanglesIntersect(image.bbox,region)){
+            return;
+        }
+
+        const left = Math.max(image.bbox[0],region.x);
+        const top = Math.max(image.bbox[1],region.y);
+        const right = Math.min(image.bbox[2],region.x + region.width);
+        const bottom = Math.min(image.bbox[3],region.y + region.height);
+        const hotspot = document.createElement("button");
+        hotspot.type = "button";
+        hotspot.className = "pdf-image-hotspot";
+        hotspot.setAttribute("aria-label",image.label || "Enlarge image");
+        hotspot.style.left = ((left - region.x) / region.width * 100) + "%";
+        hotspot.style.top = ((top - region.y) / region.height * 100) + "%";
+        hotspot.style.width = ((right - left) / region.width * 100) + "%";
+        hotspot.style.height = ((bottom - top) / region.height * 100) + "%";
+        hotspot.addEventListener("click",event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if(typeof window.openProjectImage === "function"){
+                window.openProjectImage(image.asset);
+            }
+        });
+        shell.appendChild(hotspot);
+        });
+    }
+
+    (pageData.links || []).forEach(link => {
+        if(!link.url || !rectanglesIntersect(link.bbox,region)){
+            return;
+        }
+
+        const left = Math.max(link.bbox[0],region.x);
+        const top = Math.max(link.bbox[1],region.y);
+        const right = Math.min(link.bbox[2],region.x + region.width);
+        const bottom = Math.min(link.bbox[3],region.y + region.height);
+        const anchor = document.createElement("a");
+        anchor.className = "pdf-link-hotspot";
+        anchor.href = link.url;
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+        anchor.setAttribute("aria-label",link.label || "Open project link");
+        anchor.style.left = ((left - region.x) / region.width * 100) + "%";
+        anchor.style.top = ((top - region.y) / region.height * 100) + "%";
+        anchor.style.width = ((right - left) / region.width * 100) + "%";
+        anchor.style.height = ((bottom - top) / region.height * 100) + "%";
+        shell.appendChild(anchor);
+    });
+}
+
+async function renderPdfRegion(page,pageData,region,targetWidth,className){
+    const scale = targetWidth / region.width;
+    const viewport = page.getViewport({scale:scale});
+    const displayHeight = region.height * scale;
+    const pixelRatio = window.devicePixelRatio || 1;
+    const shell = document.createElement("div");
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    shell.className = className;
+    shell.style.width = targetWidth + "px";
+    shell.style.height = displayHeight + "px";
+
+    canvas.className = "pdf-page";
+    canvas.width = Math.max(1,Math.floor(targetWidth * pixelRatio));
+    canvas.height = Math.max(1,Math.floor(displayHeight * pixelRatio));
+    canvas.style.width = targetWidth + "px";
+    canvas.style.height = displayHeight + "px";
+    shell.appendChild(canvas);
+
+    await page.render({
+        canvasContext:context,
+        viewport:viewport,
+        transform:[
+            pixelRatio,
+            0,
+            0,
+            pixelRatio,
+            -region.x * scale * pixelRatio,
+            -region.y * scale * pixelRatio
+        ]
+    }).promise;
+
+    addPdfImageHotspots(shell,pageData,region);
+
+    if(pageData && pageData.text){
+        const accessibleText = document.createElement("span");
+        accessibleText.className = "pdf-accessible-text";
+        accessibleText.textContent = pageData.text;
+        shell.appendChild(accessibleText);
+    }
+
+    return shell;
+}
+
+window.loadPDF = async function(url){
     const renderId = ++currentRenderId;
 
     closeMobileMenu();
     hideAllViewers();
-
     viewer.style.display = "block";
     loading.classList.add("loading-visible");
 
     try{
-
-        const pdf = await pdfjsLib
-            .getDocument(url)
-            .promise;
+        const pdf = await pdfjsLib.getDocument(url).promise;
 
         if(renderId !== currentRenderId){
             return;
         }
 
-        const initialViewerWidth = viewer.clientWidth;
+        const projectData = pdfProjectData(url);
+        const mobile = window.matchMedia("(max-width:800px)").matches;
+        const availableWidth = viewer.clientWidth;
+        const columnList = mobile ? document.createElement("div") : null;
 
-        for(
-            let pageNumber = 1;
-            pageNumber <= pdf.numPages;
-            pageNumber++
-        ){
+        if(columnList){
+            columnList.className = "pdf-column-list";
+            viewer.appendChild(columnList);
+        }
 
+        for(let pageNumber = 1;pageNumber <= pdf.numPages;pageNumber++){
             if(renderId !== currentRenderId){
                 return;
             }
 
             const page = await pdf.getPage(pageNumber);
+            const viewport = page.getViewport({scale:1});
+            const pageData = projectData?.pages?.[pageNumber - 1] || null;
+            const detectedColumns = pageData?.columns || [];
 
-            const baseViewport = page.getViewport({
-                scale:1
-            });
+            if(mobile && detectedColumns.length >= 2){
+                const targetWidth = Math.max(1,columnList.clientWidth);
 
-            const scale =
-                initialViewerWidth /
-                baseViewport.width;
-
-            const viewport = page.getViewport({
-                scale:scale
-            });
-
-            const canvas =
-                document.createElement("canvas");
-
-            canvas.className = "pdf-page";
-
-            const context =
-                canvas.getContext("2d");
-
-            const pixelRatio =
-                window.devicePixelRatio || 1;
-
-            canvas.width =
-                Math.floor(
-                    viewport.width *
-                    pixelRatio
+                for(const column of detectedColumns){
+                    const shell = await renderPdfRegion(
+                        page,
+                        pageData,
+                        column,
+                        targetWidth,
+                        "pdf-column-shell"
+                    );
+                    columnList.appendChild(shell);
+                }
+            }
+            else{
+                const region = {
+                    x:0,
+                    y:0,
+                    width:viewport.width,
+                    height:viewport.height
+                };
+                const shell = await renderPdfRegion(
+                    page,
+                    pageData,
+                    region,
+                    availableWidth,
+                    "pdf-page-shell"
                 );
-
-            canvas.height =
-                Math.floor(
-                    viewport.height *
-                    pixelRatio
-                );
-
-            canvas.style.width =
-                viewport.width + "px";
-
-            canvas.style.height =
-                viewport.height + "px";
-
-            viewer.appendChild(canvas);
-
-            await page.render({
-                canvasContext:context,
-                viewport:viewport,
-                transform:
-                    pixelRatio !== 1
-                    ? [
-                        pixelRatio,
-                        0,
-                        0,
-                        pixelRatio,
-                        0,
-                        0
-                    ]
-                    : null
-            }).promise;
+                viewer.appendChild(shell);
+            }
         }
 
         loading.classList.remove("loading-visible");
         revealProject(viewer);
-
+        window.scrollTo({top:0,behavior:"smooth"});
     }
     catch(error){
-
         if(renderId !== currentRenderId){
             return;
         }
 
         loading.classList.remove("loading-visible");
-
         viewer.innerHTML =
         "<p style='padding:40px;text-align:center'>Unable to load PDF.</p>";
-
         console.error(error);
     }
 };
@@ -1535,9 +1620,18 @@ function searchableLinks(){
         .map(link => ({
             label:link.textContent.trim(),
             link:link,
-            svgUrl:extractSvgUrl(link)
+            svgUrl:extractSvgUrl(link),
+            pdfUrl:extractPdfUrl(link)
         }))
         .filter(item => item.label);
+
+}
+
+function extractPdfUrl(link){
+
+    const handler = link.getAttribute("onclick") || "";
+    const match = handler.match(/loadPDF\(\s*(["'])(.*?)\1\s*\)/);
+    return match ? match[2] : null;
 
 }
 
@@ -1568,6 +1662,7 @@ function buildSearchIndex(){
 
     searchIndexPromise = Promise.all(items.map(async item => {
         let svgContent = "";
+        let pdfContent = "";
 
         if(item.svgUrl){
             try{
@@ -1589,9 +1684,16 @@ function buildSearchIndex(){
             }
         }
 
+        if(item.pdfUrl){
+            const pdfData = pdfProjectData(item.pdfUrl);
+            pdfContent = pdfData?.text || "";
+        }
+
         return {
             ...item,
-            searchableText:normalizeSearchText(item.label + " " + svgContent)
+            searchableText:normalizeSearchText(
+                item.label + " " + svgContent + " " + pdfContent
+            )
         };
     }));
 
