@@ -819,11 +819,20 @@ footer a:hover{
         display:none;
         width:100%;
         overflow-x:auto;
+        overflow-y:visible;
+        -webkit-overflow-scrolling:touch;
+        overscroll-behavior-x:contain;
+        touch-action:pan-x pan-y pinch-zoom;
     }
 
     #svgViewer svg{
         margin-left:auto;
         margin-right:auto;
+    }
+
+    #svgViewer.mobile-svg-scroll svg{
+        margin-left:0;
+        margin-right:0;
     }
 
     .video-project{
@@ -1366,13 +1375,36 @@ window.loadSVG = async function(url){
         const initialViewerWidth =
             svgViewer.clientWidth;
 
+        const isMobile =
+            window.matchMedia("(max-width:800px)").matches;
+
+        const hasReadableText =
+            [...svg.querySelectorAll("text")]
+            .some(element =>
+                (element.textContent || "").trim().length > 0
+            );
+
+        /* On phones, text-heavy landscape projects become a horizontally
+           scrollable canvas instead of being compressed into the viewport. */
+        const mobileSvgZoom = 2.75;
+        const shouldUseMobileScroll =
+            isMobile && hasReadableText;
+        const renderedWidth = shouldUseMobileScroll
+            ? initialViewerWidth * mobileSvgZoom
+            : initialViewerWidth;
+
+        svgViewer.classList.toggle(
+            "mobile-svg-scroll",
+            shouldUseMobileScroll
+        );
+
         svg.style.display = "block";
         svg.style.width =
-            initialViewerWidth + "px";
+            renderedWidth + "px";
         svg.style.height = "auto";
         svg.style.maxWidth = "none";
-        svg.style.marginLeft = "auto";
-        svg.style.marginRight = "auto";
+        svg.style.marginLeft = shouldUseMobileScroll ? "0" : "auto";
+        svg.style.marginRight = shouldUseMobileScroll ? "0" : "auto";
 
         svgViewer.scrollLeft = 0;
 
