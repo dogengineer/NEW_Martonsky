@@ -939,13 +939,13 @@ footer a:hover{
     transform:scale(1);
 }
 
-.svg-image-lightbox-content svg{
+.svg-image-lightbox-content img{
     display:block;
-    width:100%;
-    height:100%;
+    width:auto;
+    height:auto;
     max-width:94vw;
     max-height:92vh;
-    overflow:visible;
+    object-fit:contain;
 }
 
 .svg-image-lightbox-close{
@@ -1796,7 +1796,7 @@ function(){
     <div class="svg-image-lightbox-content"></div>
 </div>
 
-<script>window.SVG_IMAGE_MANIFEST = {"pdf/01_Illustrations/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/03_home-page_2.svg": {"images": 2, "embedded": 2, "external": 0}, "pdf/01_Illustrations/03_nipote di prova/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/03_nipote di prova/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/03_nipote di prova/03_nipote di prova - Copia/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/04_Beyond-Human-Skin_href.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/05_martina prova 1/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/05_martina prova 1/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/02_Commissioned/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/02_Commissioned/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/02_Commissioned/03_Beyond_Human_Skin_merged.svg": {"images": 12, "embedded": 12, "external": 0}, "pdf/02_Commissioned/04_pippo da solo.svg": {"images": 12, "embedded": 12, "external": 0}, "pdf/02_Commissioned/05_Miao con i gattini/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/02_Commissioned/05_Miao con i gattini/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/03_Artist Statement/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/home.svg": {"images": 2, "embedded": 2, "external": 0}};</script>
+<script>window.SVG_IMAGE_MANIFEST = {"pdf/01_Illustrations/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_home-page_2.svg": {"images": 2, "embedded": 2, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/01_Illustrations/03_nipote di prova/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_nipote di prova/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_nipote di prova/03_nipote di prova - Copia/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/04_Beyond-Human-Skin_href.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/05_martina prova 1/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/05_martina prova 1/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/03_Beyond_Human_Skin_merged.svg": {"images": 12, "embedded": 12, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/02_Commissioned/04_pippo da solo.svg": {"images": 12, "embedded": 12, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/02_Commissioned/05_Miao con i gattini/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/05_Miao con i gattini/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/03_Artist Statement/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/home.svg": {"images": 2, "embedded": 2, "external": 0, "has_text": false, "zoom_enabled": false}};</script>
 
 <script>
 (function(){
@@ -1851,27 +1851,27 @@ function(){
         },230);
     }
 
-    function openLightbox(svg,bounds){
-        const clone = svg.cloneNode(true);
-        clone.removeAttribute("width");
-        clone.removeAttribute("height");
-        clone.removeAttribute("style");
-        clone.removeAttribute("data-zoom-ready");
-        clone.querySelectorAll(".svg-zoom-hotspot").forEach(node => node.remove());
-
-        const padding = Math.max(bounds.width,bounds.height) * .018;
-        clone.setAttribute(
-            "viewBox",
-            [
-                bounds.x - padding,
-                bounds.y - padding,
-                bounds.width + padding * 2,
-                bounds.height + padding * 2
-            ].join(" ")
+    function imageSource(image){
+        return (
+            image.getAttribute("href") ||
+            image.getAttributeNS("http://www.w3.org/1999/xlink","href") ||
+            ""
         );
-        clone.setAttribute("preserveAspectRatio","xMidYMid meet");
+    }
 
-        lightboxContent.replaceChildren(clone);
+    function openLightbox(image){
+        const source = imageSource(image);
+
+        if(!source){
+            return;
+        }
+
+        const enlargedImage = document.createElement("img");
+        enlargedImage.src = source;
+        enlargedImage.alt = image.getAttribute("aria-label") || "Enlarged project image";
+        enlargedImage.decoding = "async";
+
+        lightboxContent.replaceChildren(enlargedImage);
         previousOverflow = document.body.style.overflow;
         document.body.style.overflow = "hidden";
         lightbox.classList.add("open");
@@ -1885,6 +1885,13 @@ function(){
 
         svg.dataset.zoomReady = "true";
         const images = [...svg.querySelectorAll("image")];
+        const hasText = [...svg.querySelectorAll("text")]
+            .some(element => (element.textContent || "").trim().length > 0);
+
+        /* A full-page SVG containing only an image does not need a lightbox. */
+        if(!hasText){
+            return;
+        }
 
         images.forEach((image,index) => {
             let bounds;
@@ -1917,7 +1924,7 @@ function(){
             const open = event => {
                 event.preventDefault();
                 event.stopPropagation();
-                openLightbox(svg,bounds);
+                openLightbox(image);
             };
 
             hotspot.addEventListener("click",open);

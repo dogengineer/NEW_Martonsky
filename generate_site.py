@@ -55,13 +55,13 @@ SVG_ZOOM_CSS = r"""
     transform:scale(1);
 }
 
-.svg-image-lightbox-content svg{
+.svg-image-lightbox-content img{
     display:block;
-    width:100%;
-    height:100%;
+    width:auto;
+    height:auto;
     max-width:94vw;
     max-height:92vh;
-    overflow:visible;
+    object-fit:contain;
 }
 
 .svg-image-lightbox-close{
@@ -157,27 +157,27 @@ SVG_ZOOM_JS = r"""
         },230);
     }
 
-    function openLightbox(svg,bounds){
-        const clone = svg.cloneNode(true);
-        clone.removeAttribute("width");
-        clone.removeAttribute("height");
-        clone.removeAttribute("style");
-        clone.removeAttribute("data-zoom-ready");
-        clone.querySelectorAll(".svg-zoom-hotspot").forEach(node => node.remove());
-
-        const padding = Math.max(bounds.width,bounds.height) * .018;
-        clone.setAttribute(
-            "viewBox",
-            [
-                bounds.x - padding,
-                bounds.y - padding,
-                bounds.width + padding * 2,
-                bounds.height + padding * 2
-            ].join(" ")
+    function imageSource(image){
+        return (
+            image.getAttribute("href") ||
+            image.getAttributeNS("http://www.w3.org/1999/xlink","href") ||
+            ""
         );
-        clone.setAttribute("preserveAspectRatio","xMidYMid meet");
+    }
 
-        lightboxContent.replaceChildren(clone);
+    function openLightbox(image){
+        const source = imageSource(image);
+
+        if(!source){
+            return;
+        }
+
+        const enlargedImage = document.createElement("img");
+        enlargedImage.src = source;
+        enlargedImage.alt = image.getAttribute("aria-label") || "Enlarged project image";
+        enlargedImage.decoding = "async";
+
+        lightboxContent.replaceChildren(enlargedImage);
         previousOverflow = document.body.style.overflow;
         document.body.style.overflow = "hidden";
         lightbox.classList.add("open");
@@ -191,6 +191,13 @@ SVG_ZOOM_JS = r"""
 
         svg.dataset.zoomReady = "true";
         const images = [...svg.querySelectorAll("image")];
+        const hasText = [...svg.querySelectorAll("text")]
+            .some(element => (element.textContent || "").trim().length > 0);
+
+        /* A full-page SVG containing only an image does not need a lightbox. */
+        if(!hasText){
+            return;
+        }
 
         images.forEach((image,index) => {
             let bounds;
@@ -223,7 +230,7 @@ SVG_ZOOM_JS = r"""
             const open = event => {
                 event.preventDefault();
                 event.stopPropagation();
-                openLightbox(svg,bounds);
+                openLightbox(image);
             };
 
             hotspot.addEventListener("click",open);
@@ -460,6 +467,11 @@ def analyze_svg_images():
                 element for element in root.iter()
                 if local_tag_name(element.tag) == "image"
             ]
+            text_elements = [
+                element for element in root.iter()
+                if local_tag_name(element.tag) == "text"
+                and "".join(element.itertext()).strip()
+            ]
 
             embedded = 0
             external = 0
@@ -480,6 +492,8 @@ def analyze_svg_images():
                 "images": len(images),
                 "embedded": embedded,
                 "external": external,
+                "has_text": bool(text_elements),
+                "zoom_enabled": bool(images and text_elements),
             }
 
         except (ET.ParseError, OSError) as error:
@@ -487,6 +501,8 @@ def analyze_svg_images():
                 "images": 0,
                 "embedded": 0,
                 "external": 0,
+                "has_text": False,
+                "zoom_enabled": False,
                 "error": str(error),
             }
 
@@ -550,20 +566,27 @@ def main():
 
     svg_count = len(svg_manifest)
     image_count = sum(item["images"] for item in svg_manifest.values())
+    zoomable_image_count = sum(
+        item["images"]
+        for item in svg_manifest.values()
+        if item["zoom_enabled"]
+    )
     error_count = sum("error" in item for item in svg_manifest.values())
 
     print(f"SVG analizzati: {svg_count}")
-    print(f"Immagini SVG rese ingrandibili: {image_count}")
+    print(f"Immagini SVG trovate: {image_count}")
+    print(f"Immagini rese ingrandibili: {zoomable_image_count}")
 
     if error_count:
         print(f"SVG non analizzati per errore: {error_count}")
 
     for svg_path, info in svg_manifest.items():
         if info["images"]:
+            zoom_status = "zoom attivo" if info["zoom_enabled"] else "zoom disattivato: nessun testo"
             print(
                 f"  - {svg_path}: {info['images']} immagini "
                 f"({info['embedded']} incorporate, "
-                f"{info['external']} esterne)"
+                f"{info['external']} esterne; {zoom_status})"
             )
 
 if __name__ == "__main__":
