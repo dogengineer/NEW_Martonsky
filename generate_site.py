@@ -26,15 +26,28 @@ SVG_ZOOM_CSS = r"""
     gap:28px;
     overflow:hidden;
     background:#fff;
+    box-sizing:border-box;
+    padding:0 clamp(14px,4vw,24px);
 }
 
-.mobile-svg-columns svg{
+.mobile-svg-column-frame{
+    display:flex;
+    justify-content:center;
+    width:100%;
+    overflow:hidden;
+    contain:paint;
+    isolation:isolate;
+    background:#fff;
+}
+
+.mobile-svg-column-frame svg{
     display:block;
     width:100% !important;
     height:auto !important;
     max-width:none;
     margin:0 !important;
     background:#fff;
+    overflow:hidden;
 }
 
 #svgImageLightbox{
@@ -366,6 +379,9 @@ SVG_ZOOM_JS = r"""
         wrapper.dataset.columnLayoutDetected = "true";
 
         const clones = columns.map((column,index) => {
+            const frame = document.createElement("div");
+            frame.className = "mobile-svg-column-frame";
+
             const clone = svg.cloneNode(true);
             clone.removeAttribute("width");
             clone.removeAttribute("height");
@@ -379,7 +395,8 @@ SVG_ZOOM_JS = r"""
             );
             clone.setAttribute("preserveAspectRatio","xMidYMin meet");
             clone.setAttribute("aria-label","Project column " + (index + 1));
-            wrapper.appendChild(clone);
+            frame.appendChild(clone);
+            wrapper.appendChild(frame);
             return clone;
         });
 
@@ -500,7 +517,11 @@ SVG_ZOOM_JS = r"""
             viewer.querySelector(".mobile-svg-columns");
 
         if(existingColumns){
-            const columnSvgs = [...existingColumns.querySelectorAll(":scope > svg")];
+            const columnSvgs = [
+                ...existingColumns.querySelectorAll(
+                    ":scope > .mobile-svg-column-frame > svg"
+                )
+            ];
             window.requestAnimationFrame(() => {
                 columnSvgs.forEach(prepareSvg);
             });
