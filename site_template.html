@@ -1083,14 +1083,67 @@ function rectanglesIntersect(first,second){
         first[3] > second.y;
 }
 
-function addPdfImageHotspots(shell,pageData,region){
+async function renderPdfImageCrop(page,bbox){
+    const width = Math.max(1,bbox[2] - bbox[0]);
+    const height = Math.max(1,bbox[3] - bbox[1]);
+    const scale = Math.min(4,Math.max(2,1800 / width));
+    const viewport = page.getViewport({scale:scale});
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    canvas.width = Math.max(1,Math.ceil(width * scale));
+    canvas.height = Math.max(1,Math.ceil(height * scale));
+
+    await page.render({
+        canvasContext:context,
+        viewport:viewport,
+        transform:[
+            1,
+            0,
+            0,
+            1,
+            -bbox[0] * scale,
+            -bbox[1] * scale
+        ]
+    }).promise;
+
+    return canvas.toDataURL("image/png");
+}
+
+async function addPdfTextLayer(shell,page,region,scale){
+    if(!pdfjsLib.TextLayer){
+        return;
+    }
+
+    const viewport = page.getViewport({scale:scale});
+    const clip = document.createElement("div");
+    const layer = document.createElement("div");
+
+    clip.className = "pdf-text-clip";
+    layer.className = "pdf-text-layer";
+    layer.style.left = (-region.x * scale) + "px";
+    layer.style.top = (-region.y * scale) + "px";
+    layer.style.width = viewport.width + "px";
+    layer.style.height = viewport.height + "px";
+    clip.appendChild(layer);
+    shell.appendChild(clip);
+
+    const textLayer = new pdfjsLib.TextLayer({
+        textContentSource:await page.getTextContent(),
+        container:layer,
+        viewport:viewport
+    });
+    await textLayer.render();
+}
+
+function addPdfImageHotspots(shell,page,pageData,region){
     if(!pageData){
         return;
     }
 
     if((pageData.text || "").trim()){
         (pageData.images || []).forEach(image => {
-        if(!image.asset || !rectanglesIntersect(image.bbox,region)){
+        if(!rectanglesIntersect(image.bbox,region)){
             return;
         }
 
@@ -1106,11 +1159,21 @@ function addPdfImageHotspots(shell,pageData,region){
         hotspot.style.top = ((top - region.y) / region.height * 100) + "%";
         hotspot.style.width = ((right - left) / region.width * 100) + "%";
         hotspot.style.height = ((bottom - top) / region.height * 100) + "%";
-        hotspot.addEventListener("click",event => {
+        hotspot.addEventListener("click",async event => {
             event.preventDefault();
             event.stopPropagation();
-            if(typeof window.openProjectImage === "function"){
-                window.openProjectImage(image.asset);
+            hotspot.disabled = true;
+            loading.classList.add("loading-visible");
+            try{
+                const source = await renderPdfImageCrop(page,image.bbox);
+                if(typeof window.openProjectImage === "function"){
+                    window.openProjectImage(source);
+                }
+            }catch(error){
+                console.error("Impossibile ingrandire l'immagine PDF:",error);
+            }finally{
+                hotspot.disabled = false;
+                loading.classList.remove("loading-visible");
             }
         });
         shell.appendChild(hotspot);
@@ -1173,14 +1236,8 @@ async function renderPdfRegion(page,pageData,region,targetWidth,className){
         ]
     }).promise;
 
-    addPdfImageHotspots(shell,pageData,region);
-
-    if(pageData && pageData.text){
-        const accessibleText = document.createElement("span");
-        accessibleText.className = "pdf-accessible-text";
-        accessibleText.textContent = pageData.text;
-        shell.appendChild(accessibleText);
-    }
+    await addPdfTextLayer(shell,page,region,scale);
+    addPdfImageHotspots(shell,page,pageData,region);
 
     return shell;
 }

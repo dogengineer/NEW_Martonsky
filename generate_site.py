@@ -2,7 +2,6 @@ from pathlib import Path
 import html
 import re
 import json
-import hashlib
 import xml.etree.ElementTree as ET
 
 try:
@@ -13,8 +12,6 @@ except ImportError:
 BASE_DIR = Path("pdf")
 TEMPLATE_FILE = Path("site_template.html")
 OUTPUT_FILE = Path("index.html")
-PDF_ASSETS_DIR = Path("_generated_pdf_assets")
-
 SUPPORTED_EXTENSIONS = {".pdf", ".html", ".htm", ".svg"}
 
 SVG_ZOOM_CSS = r"""
@@ -103,14 +100,39 @@ SVG_ZOOM_CSS = r"""
     outline-offset:2px;
 }
 
-.pdf-accessible-text{
+.pdf-text-clip{
     position:absolute;
-    width:1px;
-    height:1px;
+    inset:0;
+    z-index:2;
     overflow:hidden;
-    clip:rect(0 0 0 0);
-    clip-path:inset(50%);
-    white-space:nowrap;
+    pointer-events:none;
+}
+
+.pdf-text-layer{
+    position:absolute;
+    margin:0;
+    padding:0;
+    overflow:hidden;
+    line-height:1;
+    text-align:initial;
+    text-size-adjust:none;
+    forced-color-adjust:none;
+    transform-origin:0 0;
+    pointer-events:auto;
+}
+
+.pdf-text-layer span,
+.pdf-text-layer br{
+    position:absolute;
+    color:transparent;
+    white-space:pre;
+    cursor:text;
+    transform-origin:0 0;
+}
+
+.pdf-text-layer ::selection{
+    color:transparent;
+    background:rgba(40,110,255,.28);
 }
 
 #svgImageLightbox{
@@ -933,7 +955,10 @@ def detect_pdf_columns(page_width, page_height, rectangles, has_text):
     if not 2 <= len(groups) <= 4:
         return []
 
-    minimum_gap = page_width * 0.018
+    # InDesign spreads often use a narrow but deliberate gutter. 1.2% keeps
+    # those columns separate without treating ordinary word/paragraph gaps as
+    # independent columns.
+    minimum_gap = page_width * 0.012
     if any(
         groups[index + 1][0] - groups[index][1] < minimum_gap
         for index in range(len(groups) - 1)
@@ -942,9 +967,18 @@ def detect_pdf_columns(page_width, page_height, rectangles, has_text):
 
     padding = page_width * 0.012
     columns = []
-    for x0, x1 in groups:
-        left = max(0.0, x0 - padding)
-        right = min(page_width, x1 + padding)
+    for index, (x0, x1) in enumerate(groups):
+        left_padding = padding
+        right_padding = padding
+        if index > 0:
+            previous_gap = x0 - groups[index - 1][1]
+            left_padding = min(padding, previous_gap * 0.45)
+        if index + 1 < len(groups):
+            next_gap = groups[index + 1][0] - x1
+            right_padding = min(padding, next_gap * 0.45)
+
+        left = max(0.0, x0 - left_padding)
+        right = min(page_width, x1 + right_padding)
         columns.append({
             "x": round(left, 3),
             "y": 0.0,
@@ -954,14 +988,8 @@ def detect_pdf_columns(page_width, page_height, rectangles, has_text):
 
     return columns
 
-def _pdf_asset_folder(pdf_path):
-    relative = pdf_path.relative_to(BASE_DIR).as_posix()
-    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(relative).stem).strip("-")
-    digest = hashlib.sha1(relative.encode("utf-8")).hexdigest()[:8]
-    return PDF_ASSETS_DIR / f"{stem or 'project'}-{digest}"
-
 def analyze_pdf_projects():
-    """Extract searchable text, image assets and mobile columns from PDFs."""
+    """Extract searchable text, image bounds and mobile columns from PDFs."""
     manifest = {}
 
     if not BASE_DIR.is_dir():
@@ -981,14 +1009,10 @@ def analyze_pdf_projects():
 
     for pdf_path in pdf_files:
         url = pdf_path.as_posix()
-        asset_folder = _pdf_asset_folder(pdf_path)
-        asset_folder.mkdir(parents=True, exist_ok=True)
-
         try:
             document = fitz.open(pdf_path)
             pages = []
             all_text = []
-            extracted_assets = {}
 
             for page_index, page in enumerate(document):
                 page_width = float(page.rect.width)
@@ -1013,21 +1037,8 @@ def analyze_pdf_projects():
                         continue
 
                     image_rectangles.append(bbox)
-                    xref = int(image_info.get("xref") or 0)
-                    asset_url = ""
-
-                    if xref > 0:
-                        if xref not in extracted_assets:
-                            extracted = document.extract_image(xref)
-                            extension = extracted.get("ext", "png")
-                            asset_path = asset_folder / f"xref-{xref}.{extension}"
-                            asset_path.write_bytes(extracted["image"])
-                            extracted_assets[xref] = asset_path.as_posix()
-                        asset_url = extracted_assets[xref]
-
                     images.append({
                         "bbox": _pdf_rect_values(bbox),
-                        "asset": asset_url,
                         "label": f"Enlarge image {image_number}",
                     })
 
@@ -1171,7 +1182,7 @@ def main():
     pdf_error_count = sum("error" in item for item in pdf_manifest.values())
 
     print(f"PDF analizzati: {len(pdf_manifest)}")
-    print(f"Immagini PDF estraibili: {pdf_image_count}")
+    print(f"Immagini PDF rilevate: {pdf_image_count}")
     print(f"Pagine PDF con colonne mobili: {pdf_column_pages}")
 
     if pdf_error_count:
