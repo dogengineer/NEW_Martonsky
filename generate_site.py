@@ -301,28 +301,39 @@ SVG_ZOOM_JS = r"""
             }
         }
 
-        const horizontalPadding = contentBounds.width * .012;
-        const verticalPadding = contentBounds.height * .012;
-        const edges = [
-            contentBounds.x - horizontalPadding,
-            ...boundaries,
-            contentBounds.x + contentBounds.width + horizontalPadding
-        ];
-        const columns = [];
+        /*
+         * Crop every column around the elements that actually belong to it.
+         * Using the midpoint between columns as a crop edge can include a
+         * narrow strip of a wide image from the previous column.
+         */
+        const columns = groups.map(group => {
+            const minX = Math.min(...group.map(item => item.x));
+            const maxX = Math.max(
+                ...group.map(item => item.x + item.width)
+            );
+            const minY = Math.min(...group.map(item => item.minY));
+            const maxY = Math.max(...group.map(item => item.maxY));
+            const naturalWidth = maxX - minX;
+            const naturalHeight = maxY - minY;
+            const horizontalPadding = Math.max(
+                naturalWidth * .035,
+                contentBounds.width * .006
+            );
+            const verticalPadding = Math.max(
+                naturalHeight * .018,
+                contentBounds.height * .006
+            );
 
-        for(let index = 0;index < edges.length - 1;index++){
-            const width = edges[index + 1] - edges[index];
+            return {
+                x:minX - horizontalPadding,
+                y:minY - verticalPadding,
+                width:naturalWidth + horizontalPadding * 2,
+                height:naturalHeight + verticalPadding * 2
+            };
+        });
 
-            if(width < contentBounds.width * .16){
-                return null;
-            }
-
-            columns.push({
-                x:edges[index],
-                y:contentBounds.y - verticalPadding,
-                width:width,
-                height:contentBounds.height + verticalPadding * 2
-            });
+        if(columns.some(column => column.width < contentBounds.width * .16)){
+            return null;
         }
 
         return columns;
