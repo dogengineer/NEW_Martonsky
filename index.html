@@ -912,6 +912,24 @@ footer a:hover{
     pointer-events:all;
 }
 
+.mobile-svg-columns{
+    display:flex;
+    flex-direction:column;
+    width:100%;
+    gap:28px;
+    overflow:hidden;
+    background:#fff;
+}
+
+.mobile-svg-columns svg{
+    display:block;
+    width:100% !important;
+    height:auto !important;
+    max-width:none;
+    margin:0 !important;
+    background:#fff;
+}
+
 #svgImageLightbox{
     position:fixed;
     inset:0;
@@ -971,6 +989,10 @@ footer a:hover{
 }
 
 @media(max-width:800px){
+    .mobile-svg-columns{
+        gap:22px;
+    }
+
     #svgImageLightbox{
         padding:20px 12px;
     }
@@ -1844,16 +1866,16 @@ function(){
         return new DOMPoint(point.x,point.y).matrixTransform(matrix);
     }
 
-    function imageBoundsInRoot(image,svg){
-        const box = image.getBBox();
-        const imageMatrix = image.getCTM();
+    function elementBoundsInRoot(element,svg){
+        const box = element.getBBox();
+        const elementMatrix = element.getCTM();
         const rootMatrix = svg.getCTM();
 
-        if(!imageMatrix || !rootMatrix){
+        if(!elementMatrix || !rootMatrix){
             return null;
         }
 
-        const relativeMatrix = rootMatrix.inverse().multiply(imageMatrix);
+        const relativeMatrix = rootMatrix.inverse().multiply(elementMatrix);
         const corners = [
             pointInRoot({x:box.x,y:box.y},relativeMatrix),
             pointInRoot({x:box.x + box.width,y:box.y},relativeMatrix),
@@ -1871,6 +1893,226 @@ function(){
             width:Math.max(...xs) - x,
             height:Math.max(...ys) - y
         };
+    }
+
+    function svgHasText(svg){
+        return [...svg.querySelectorAll("text")]
+            .some(element => (element.textContent || "").trim().length > 0);
+    }
+
+    function rangesOverlap(first,second){
+        const overlap = Math.min(first.maxY,second.maxY) -
+            Math.max(first.minY,second.minY);
+        const smallerHeight = Math.min(
+            first.maxY - first.minY,
+            second.maxY - second.minY
+        );
+
+        return smallerHeight > 0 && overlap / smallerHeight >= .18;
+    }
+
+    function detectMobileColumns(svg){
+        if(
+            !window.matchMedia("(max-width:800px)").matches ||
+            !svgHasText(svg)
+        ){
+            return null;
+        }
+
+        let contentBounds;
+
+        try{
+            contentBounds = svg.getBBox();
+        }
+        catch(error){
+            return null;
+        }
+
+        if(
+            contentBounds.width <= 0 ||
+            contentBounds.height <= 0 ||
+            contentBounds.width / contentBounds.height < 1.15
+        ){
+            return null;
+        }
+
+        const items = [...svg.querySelectorAll("text, image")]
+            .map(element => {
+                try{
+                    return elementBoundsInRoot(element,svg);
+                }
+                catch(error){
+                    return null;
+                }
+            })
+            .filter(bounds =>
+                bounds && bounds.width > 0 && bounds.height > 0
+            )
+            .map(bounds => ({
+                ...bounds,
+                centerX:bounds.x + bounds.width / 2,
+                minY:bounds.y,
+                maxY:bounds.y + bounds.height
+            }))
+            .sort((first,second) => first.centerX - second.centerX);
+
+        if(items.length < 4){
+            return null;
+        }
+
+        const minimumGap = contentBounds.width * .105;
+        const gaps = [];
+
+        for(let index = 0;index < items.length - 1;index++){
+            const gap = items[index + 1].centerX - items[index].centerX;
+
+            if(gap >= minimumGap){
+                gaps.push({
+                    size:gap,
+                    boundary:(items[index].centerX + items[index + 1].centerX) / 2
+                });
+            }
+        }
+
+        const rankedGaps = gaps
+            .sort((first,second) => second.size - first.size);
+        const largestGap = rankedGaps[0]?.size || 0;
+        const selectedGaps = rankedGaps
+            .filter(gap => gap.size >= largestGap * .68)
+            .slice(0,3)
+            .sort((first,second) => first.boundary - second.boundary);
+
+        if(selectedGaps.length === 0){
+            return null;
+        }
+
+        const boundaries = selectedGaps.map(gap => gap.boundary);
+        const groups = Array.from(
+            {length:boundaries.length + 1},
+            () => []
+        );
+
+        items.forEach(item => {
+            const groupIndex = boundaries.findIndex(
+                boundary => item.centerX < boundary
+            );
+            groups[groupIndex === -1 ? groups.length - 1 : groupIndex].push(item);
+        });
+
+        if(groups.some(group => group.length === 0)){
+            return null;
+        }
+
+        const groupRanges = groups.map(group => ({
+            minY:Math.min(...group.map(item => item.minY)),
+            maxY:Math.max(...group.map(item => item.maxY))
+        }));
+
+        for(let index = 0;index < groupRanges.length - 1;index++){
+            if(!rangesOverlap(groupRanges[index],groupRanges[index + 1])){
+                return null;
+            }
+        }
+
+        const horizontalPadding = contentBounds.width * .012;
+        const verticalPadding = contentBounds.height * .012;
+        const edges = [
+            contentBounds.x - horizontalPadding,
+            ...boundaries,
+            contentBounds.x + contentBounds.width + horizontalPadding
+        ];
+        const columns = [];
+
+        for(let index = 0;index < edges.length - 1;index++){
+            const width = edges[index + 1] - edges[index];
+
+            if(width < contentBounds.width * .16){
+                return null;
+            }
+
+            columns.push({
+                x:edges[index],
+                y:contentBounds.y - verticalPadding,
+                width:width,
+                height:contentBounds.height + verticalPadding * 2
+            });
+        }
+
+        return columns;
+    }
+
+    function makeIdsUnique(svg,suffix){
+        const replacements = [];
+
+        svg.querySelectorAll("[id]").forEach(element => {
+            const oldId = element.id;
+            const newId = oldId + "-" + suffix;
+            replacements.push([oldId,newId]);
+            element.id = newId;
+        });
+
+        function replaceReferences(value){
+            replacements.forEach(([oldId,newId]) => {
+                const escapedId = oldId.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+                value = value.replace(
+                    new RegExp("#" + escapedId + "(?![A-Za-z0-9_.:-])","g"),
+                    "#" + newId
+                );
+            });
+            return value;
+        }
+
+        svg.querySelectorAll("*").forEach(element => {
+            [...element.attributes].forEach(attribute => {
+                const value = replaceReferences(attribute.value);
+
+                if(value !== attribute.value){
+                    if(attribute.namespaceURI){
+                        element.setAttributeNS(
+                            attribute.namespaceURI,
+                            attribute.name,
+                            value
+                        );
+                    }
+                    else{
+                        element.setAttribute(attribute.name,value);
+                    }
+                }
+            });
+        });
+
+        svg.querySelectorAll("style").forEach(style => {
+            style.textContent = replaceReferences(style.textContent || "");
+        });
+    }
+
+    function createMobileColumns(svg,columns){
+        const wrapper = document.createElement("div");
+        wrapper.className = "mobile-svg-columns";
+        wrapper.dataset.columnLayoutDetected = "true";
+
+        const clones = columns.map((column,index) => {
+            const clone = svg.cloneNode(true);
+            clone.removeAttribute("width");
+            clone.removeAttribute("height");
+            clone.removeAttribute("style");
+            clone.removeAttribute("data-zoom-ready");
+            clone.querySelectorAll(".svg-zoom-hotspot").forEach(node => node.remove());
+            makeIdsUnique(clone,"mobile-column-" + index);
+            clone.setAttribute(
+                "viewBox",
+                [column.x,column.y,column.width,column.height].join(" ")
+            );
+            clone.setAttribute("preserveAspectRatio","xMidYMin meet");
+            clone.setAttribute("aria-label","Project column " + (index + 1));
+            wrapper.appendChild(clone);
+            return clone;
+        });
+
+        viewer.classList.remove("mobile-svg-scroll");
+        viewer.scrollLeft = 0;
+        svg.replaceWith(wrapper);
+        return clones;
     }
 
     function closeLightbox(){
@@ -1917,8 +2159,7 @@ function(){
 
         svg.dataset.zoomReady = "true";
         const images = [...svg.querySelectorAll("image")];
-        const hasText = [...svg.querySelectorAll("text")]
-            .some(element => (element.textContent || "").trim().length > 0);
+        const hasText = svgHasText(svg);
 
         /* A full-page SVG containing only an image does not need a lightbox. */
         if(!hasText){
@@ -1929,7 +2170,7 @@ function(){
             let bounds;
 
             try{
-                bounds = imageBoundsInRoot(image,svg);
+                bounds = elementBoundsInRoot(image,svg);
             }
             catch(error){
                 console.warn("Unable to prepare SVG image zoom",error);
@@ -1937,6 +2178,17 @@ function(){
             }
 
             if(!bounds || bounds.width <= 0 || bounds.height <= 0){
+                return;
+            }
+
+            const viewBox = svg.viewBox.baseVal;
+            const intersectsViewBox =
+                bounds.x < viewBox.x + viewBox.width &&
+                bounds.x + bounds.width > viewBox.x &&
+                bounds.y < viewBox.y + viewBox.height &&
+                bounds.y + bounds.height > viewBox.y;
+
+            if(!intersectsViewBox){
                 return;
             }
 
@@ -1970,13 +2222,33 @@ function(){
     }
 
     function prepareCurrentSvg(){
+        const existingColumns =
+            viewer.querySelector(".mobile-svg-columns");
+
+        if(existingColumns){
+            const columnSvgs = [...existingColumns.querySelectorAll(":scope > svg")];
+            window.requestAnimationFrame(() => {
+                columnSvgs.forEach(prepareSvg);
+            });
+            return;
+        }
+
         const svg = viewer.querySelector("svg");
         if(!svg){
             return;
         }
 
         window.requestAnimationFrame(() => {
-            window.requestAnimationFrame(() => prepareSvg(svg));
+            window.requestAnimationFrame(() => {
+                const columns = detectMobileColumns(svg);
+
+                if(columns){
+                    createMobileColumns(svg,columns).forEach(prepareSvg);
+                }
+                else{
+                    prepareSvg(svg);
+                }
+            });
         });
     }
 
