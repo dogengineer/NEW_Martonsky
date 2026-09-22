@@ -894,6 +894,91 @@ footer a:hover{
         white-space:normal;
     }
 }
+
+/* Automatic SVG image zoom, injected by generate_site.py */
+.svg-zoom-hotspot{
+    fill:transparent;
+    stroke:none;
+    cursor:zoom-in;
+    pointer-events:all;
+}
+
+#svgImageLightbox{
+    position:fixed;
+    inset:0;
+    z-index:20000;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:34px;
+    background:rgba(255,255,255,.91);
+    opacity:0;
+    visibility:hidden;
+    cursor:zoom-out;
+    transition:opacity .22s ease,visibility 0s linear .22s;
+}
+
+#svgImageLightbox.open{
+    opacity:1;
+    visibility:visible;
+    transition:opacity .22s ease,visibility 0s;
+}
+
+.svg-image-lightbox-content{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:100%;
+    height:100%;
+    transform:scale(.96);
+    transition:transform .28s cubic-bezier(.2,.75,.2,1);
+    pointer-events:none;
+}
+
+#svgImageLightbox.open .svg-image-lightbox-content{
+    transform:scale(1);
+}
+
+.svg-image-lightbox-content svg{
+    display:block;
+    width:100%;
+    height:100%;
+    max-width:94vw;
+    max-height:92vh;
+    overflow:visible;
+}
+
+.svg-image-lightbox-close{
+    position:absolute;
+    top:18px;
+    right:22px;
+    z-index:1;
+    border:0;
+    padding:4px 8px;
+    background:transparent;
+    color:#111;
+    font:300 36px/1 Georgia,serif;
+    cursor:pointer;
+}
+
+@media(max-width:800px){
+    #svgImageLightbox{
+        padding:20px 12px;
+    }
+
+    .svg-image-lightbox-close{
+        top:8px;
+        right:10px;
+    }
+}
+
+@media(prefers-reduced-motion:reduce){
+    #svgImageLightbox,
+    .svg-image-lightbox-content{
+        transition:none;
+    }
+}
+
 </style>
 </head>
 
@@ -939,6 +1024,9 @@ footer a:hover{
 </ul></li>
 </ul></li>
 <li><a href="#" onclick="loadSVG(&quot;pdf/03_Artist Statement/02_Topo di plastica.svg&quot;);return false;">Artist Statement</a></li>
+<li><span class="menu-label empty-section">About</span></li>
+<li><span class="menu-label empty-section">CV</span></li>
+<li><span class="menu-label empty-section">Contact</span></li>
 <li><a href="#" onclick="loadHTML(&quot;pdf/07_Animations/01_Animations.html&quot;);return false;">Animations</a></li>
 <li><a href="#" onclick="loadContact();return false;">CONTACT</a></li>
 </ul>
@@ -1700,6 +1788,174 @@ function(){
 
 });
 
+</script>
+
+
+<div id="svgImageLightbox" role="dialog" aria-modal="true" aria-label="Enlarged image">
+    <button class="svg-image-lightbox-close" type="button" aria-label="Close enlarged image">×</button>
+    <div class="svg-image-lightbox-content"></div>
+</div>
+
+<script>window.SVG_IMAGE_MANIFEST = {"pdf/01_Illustrations/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/03_home-page_2.svg": {"images": 2, "embedded": 2, "external": 0}, "pdf/01_Illustrations/03_nipote di prova/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/03_nipote di prova/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/03_nipote di prova/03_nipote di prova - Copia/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/04_Beyond-Human-Skin_href.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/05_martina prova 1/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/01_Illustrations/05_martina prova 1/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/02_Commissioned/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/02_Commissioned/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/02_Commissioned/03_Beyond_Human_Skin_merged.svg": {"images": 12, "embedded": 12, "external": 0}, "pdf/02_Commissioned/04_pippo da solo.svg": {"images": 12, "embedded": 12, "external": 0}, "pdf/02_Commissioned/05_Miao con i gattini/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/02_Commissioned/05_Miao con i gattini/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/03_Artist Statement/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0}, "pdf/home.svg": {"images": 2, "embedded": 2, "external": 0}};</script>
+
+<script>
+(function(){
+    "use strict";
+
+    const viewer = document.getElementById("svgViewer");
+    const lightbox = document.getElementById("svgImageLightbox");
+    const lightboxContent = lightbox.querySelector(".svg-image-lightbox-content");
+    const closeButton = lightbox.querySelector(".svg-image-lightbox-close");
+    let previousOverflow = "";
+
+    function pointInRoot(point,matrix){
+        return new DOMPoint(point.x,point.y).matrixTransform(matrix);
+    }
+
+    function imageBoundsInRoot(image,svg){
+        const box = image.getBBox();
+        const imageMatrix = image.getCTM();
+        const rootMatrix = svg.getCTM();
+
+        if(!imageMatrix || !rootMatrix){
+            return null;
+        }
+
+        const relativeMatrix = rootMatrix.inverse().multiply(imageMatrix);
+        const corners = [
+            pointInRoot({x:box.x,y:box.y},relativeMatrix),
+            pointInRoot({x:box.x + box.width,y:box.y},relativeMatrix),
+            pointInRoot({x:box.x,y:box.y + box.height},relativeMatrix),
+            pointInRoot({x:box.x + box.width,y:box.y + box.height},relativeMatrix)
+        ];
+        const xs = corners.map(point => point.x);
+        const ys = corners.map(point => point.y);
+        const x = Math.min(...xs);
+        const y = Math.min(...ys);
+
+        return {
+            x:x,
+            y:y,
+            width:Math.max(...xs) - x,
+            height:Math.max(...ys) - y
+        };
+    }
+
+    function closeLightbox(){
+        lightbox.classList.remove("open");
+        document.body.style.overflow = previousOverflow;
+        window.setTimeout(() => {
+            if(!lightbox.classList.contains("open")){
+                lightboxContent.replaceChildren();
+            }
+        },230);
+    }
+
+    function openLightbox(svg,bounds){
+        const clone = svg.cloneNode(true);
+        clone.removeAttribute("width");
+        clone.removeAttribute("height");
+        clone.removeAttribute("style");
+        clone.removeAttribute("data-zoom-ready");
+        clone.querySelectorAll(".svg-zoom-hotspot").forEach(node => node.remove());
+
+        const padding = Math.max(bounds.width,bounds.height) * .018;
+        clone.setAttribute(
+            "viewBox",
+            [
+                bounds.x - padding,
+                bounds.y - padding,
+                bounds.width + padding * 2,
+                bounds.height + padding * 2
+            ].join(" ")
+        );
+        clone.setAttribute("preserveAspectRatio","xMidYMid meet");
+
+        lightboxContent.replaceChildren(clone);
+        previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        lightbox.classList.add("open");
+        closeButton.focus({preventScroll:true});
+    }
+
+    function prepareSvg(svg){
+        if(svg.dataset.zoomReady === "true"){
+            return;
+        }
+
+        svg.dataset.zoomReady = "true";
+        const images = [...svg.querySelectorAll("image")];
+
+        images.forEach((image,index) => {
+            let bounds;
+
+            try{
+                bounds = imageBoundsInRoot(image,svg);
+            }
+            catch(error){
+                console.warn("Unable to prepare SVG image zoom",error);
+                return;
+            }
+
+            if(!bounds || bounds.width <= 0 || bounds.height <= 0){
+                return;
+            }
+
+            const hotspot = document.createElementNS(
+                "http://www.w3.org/2000/svg",
+                "rect"
+            );
+            hotspot.setAttribute("x",bounds.x);
+            hotspot.setAttribute("y",bounds.y);
+            hotspot.setAttribute("width",bounds.width);
+            hotspot.setAttribute("height",bounds.height);
+            hotspot.setAttribute("class","svg-zoom-hotspot");
+            hotspot.setAttribute("tabindex","0");
+            hotspot.setAttribute("role","button");
+            hotspot.setAttribute("aria-label","Enlarge image " + (index + 1));
+
+            const open = event => {
+                event.preventDefault();
+                event.stopPropagation();
+                openLightbox(svg,bounds);
+            };
+
+            hotspot.addEventListener("click",open);
+            hotspot.addEventListener("keydown",event => {
+                if(event.key === "Enter" || event.key === " "){
+                    open(event);
+                }
+            });
+            svg.appendChild(hotspot);
+        });
+    }
+
+    function prepareCurrentSvg(){
+        const svg = viewer.querySelector("svg");
+        if(!svg){
+            return;
+        }
+
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => prepareSvg(svg));
+        });
+    }
+
+    const observer = new MutationObserver(prepareCurrentSvg);
+    observer.observe(viewer,{childList:true,subtree:false});
+
+    closeButton.addEventListener("click",closeLightbox);
+    lightbox.addEventListener("click",event => {
+        if(event.target === lightbox){
+            closeLightbox();
+        }
+    });
+    document.addEventListener("keydown",event => {
+        if(event.key === "Escape" && lightbox.classList.contains("open")){
+            closeLightbox();
+        }
+    });
+})();
 </script>
 
 </body>
