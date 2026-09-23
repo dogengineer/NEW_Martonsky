@@ -215,65 +215,211 @@ SVG_ZOOM_JS = r"""
         return smallerHeight > 0 && overlap / smallerHeight >= .18;
     }
 
-    function detectMobileColumns(svg){
-        if(
-            !window.matchMedia("(max-width:800px)").matches ||
-            !svgHasText(svg)
-        ){
-            return null;
-        }
-
-        let contentBounds;
-
-        try{
-            contentBounds = svg.getBBox();
-        }
-        catch(error){
-            return null;
-        }
-
-        if(
-            contentBounds.width <= 0 ||
-            contentBounds.height <= 0 ||
-            contentBounds.width / contentBounds.height < 1.15
-        ){
-            return null;
-        }
-
-        const items = [...svg.querySelectorAll("text, image")]
+    function collectLayoutItems(svg){
+        return [...svg.querySelectorAll("text, image")]
+            .filter(element => !element.closest("mask,defs,clipPath,pattern"))
             .map(element => {
                 try{
-                    return elementBoundsInRoot(element,svg);
+                    const bounds = elementBoundsInRoot(element,svg);
+                    const page = element.closest("g[data-page]");
+                    return bounds
+                        ? {
+                            ...bounds,
+                            kind:element.tagName.toLowerCase(),
+                            pageKey:page?.getAttribute("data-page") || null
+                        }
+                        : null;
                 }
                 catch(error){
                     return null;
                 }
             })
-            .filter(bounds =>
-                bounds && bounds.width > 0 && bounds.height > 0
-            )
+            .filter(bounds => bounds && bounds.width > 0 && bounds.height > 0)
             .map(bounds => ({
                 ...bounds,
                 centerX:bounds.x + bounds.width / 2,
+                centerY:bounds.y + bounds.height / 2,
                 minY:bounds.y,
                 maxY:bounds.y + bounds.height
-            }))
-            .sort((first,second) => first.centerX - second.centerX);
+            }));
+    }
 
-        if(items.length < 4){
+    function detectDocumentPageBands(items){
+        const pageKeys = [...new Set(
+            items.map(item => item.pageKey).filter(Boolean)
+        )];
+
+        if(pageKeys.length < 2){
             return null;
         }
 
+        const bands = pageKeys
+            .map(pageKey => {
+                const pageItems = items.filter(item => item.pageKey === pageKey);
+
+                if(pageItems.length < 1){
+                    return null;
+                }
+
+                return {
+                    minY:Math.min(...pageItems.map(item => item.minY)),
+                    maxY:Math.max(...pageItems.map(item => item.maxY)),
+                    items:pageItems
+                };
+            })
+            .filter(Boolean)
+            .sort((first,second) => first.minY - second.minY);
+
+        return bands.length === pageKeys.length ? bands : null;
+    }
+
+    function median(values){
+        if(values.length === 0){
+            return 0;
+        }
+
+        const sorted = [...values].sort((first,second) => first - second);
+        const middle = Math.floor(sorted.length / 2);
+        return sorted.length % 2
+            ? sorted[middle]
+            : (sorted[middle - 1] + sorted[middle]) / 2;
+    }
+
+    /*
+     * Find only substantial horizontal corridors that are empty across the
+     * whole project. Small spaces between text lines are intentionally
+     * ignored. The resulting bands are ordered from top to bottom.
+     */
+    function detectHorizontalBands(items,contentBounds){
+        const intervals = items
+            .map(item => ({min:item.minY,max:item.maxY}))
+            .sort((first,second) => first.min - second.min);
+
+        if(intervals.length < 4){
+            return null;
+        }
+
+        const occupied = [];
+        intervals.forEach(interval => {
+            const current = occupied[occupied.length - 1];
+
+            if(current && interval.min <= current.max){
+                current.max = Math.max(current.max,interval.max);
+            }
+            else{
+                occupied.push({...interval});
+            }
+        });
+
+        const textHeights = items
+            .filter(item => item.kind === "text")
+            .map(item => item.height)
+            .filter(height => height > 0);
+        const typicalItemHeight = median(
+            textHeights.length
+                ? textHeights
+                : items.map(item => item.height).filter(height => height > 0)
+        );
+        const minimumGap = Math.max(
+            contentBounds.height * .012,
+            typicalItemHeight * 1.5
+        );
+        const minimumBandHeight = Math.max(
+            contentBounds.height * .06,
+            typicalItemHeight * 6
+        );
+        const candidates = [];
+
+        for(let index = 0;index < occupied.length - 1;index++){
+            const start = occupied[index].max;
+            const end = occupied[index + 1].min;
+
+            if(end - start >= minimumGap){
+                candidates.push({
+                    start:start,
+                    end:end,
+                    boundary:(start + end) / 2
+                });
+            }
+        }
+
+        if(candidates.length === 0){
+            return null;
+        }
+
+        /*
+         * Discard separators that would create a tiny strip. This is the
+         * main protection against paragraph spacing being mistaken for a
+         * second layout row.
+         */
+        const boundaries = [];
+        let previousBoundary = contentBounds.y;
+
+        candidates.forEach((candidate,index) => {
+            const nextBoundary = candidates[index + 1]?.boundary ||
+                contentBounds.y + contentBounds.height;
+
+            if(
+                candidate.boundary - previousBoundary >= minimumBandHeight &&
+                nextBoundary - candidate.boundary >= minimumBandHeight
+            ){
+                boundaries.push(candidate.boundary);
+                previousBoundary = candidate.boundary;
+            }
+        });
+
+        if(boundaries.length === 0){
+            return null;
+        }
+
+        const edges = [
+            contentBounds.y,
+            ...boundaries,
+            contentBounds.y + contentBounds.height
+        ];
+        const bands = [];
+
+        for(let index = 0;index < edges.length - 1;index++){
+            const bandItems = items.filter(item =>
+                item.centerY >= edges[index] &&
+                item.centerY < edges[index + 1]
+            );
+
+            if(bandItems.length < 2){
+                return null;
+            }
+
+            bands.push({
+                minY:edges[index],
+                maxY:edges[index + 1],
+                items:bandItems
+            });
+        }
+
+        return bands.length > 1 ? bands : null;
+    }
+
+    function detectColumnsForItems(items,contentBounds){
+        if(items.length < 2){
+            return null;
+        }
+
+        const sortedItems = [...items]
+            .sort((first,second) => first.centerX - second.centerX);
         const minimumGap = contentBounds.width * .105;
         const gaps = [];
 
-        for(let index = 0;index < items.length - 1;index++){
-            const gap = items[index + 1].centerX - items[index].centerX;
+        for(let index = 0;index < sortedItems.length - 1;index++){
+            const gap = sortedItems[index + 1].centerX -
+                sortedItems[index].centerX;
 
             if(gap >= minimumGap){
                 gaps.push({
                     size:gap,
-                    boundary:(items[index].centerX + items[index + 1].centerX) / 2
+                    boundary:(
+                        sortedItems[index].centerX +
+                        sortedItems[index + 1].centerX
+                    ) / 2
                 });
             }
         }
@@ -296,7 +442,7 @@ SVG_ZOOM_JS = r"""
             () => []
         );
 
-        items.forEach(item => {
+        sortedItems.forEach(item => {
             const groupIndex = boundaries.findIndex(
                 boundary => item.centerX < boundary
             );
@@ -354,6 +500,106 @@ SVG_ZOOM_JS = r"""
         }
 
         return columns;
+    }
+
+    function detectMobileColumns(svg){
+        if(
+            !window.matchMedia("(max-width:800px)").matches ||
+            !svgHasText(svg)
+        ){
+            return null;
+        }
+
+        let contentBounds;
+
+        try{
+            contentBounds = svg.getBBox();
+        }
+        catch(error){
+            return null;
+        }
+
+        if(
+            contentBounds.width <= 0 ||
+            contentBounds.height <= 0
+        ){
+            return null;
+        }
+
+        const items = collectLayoutItems(svg);
+
+        if(items.length < 4){
+            return null;
+        }
+
+        const pageBands = detectDocumentPageBands(items);
+        const bands = pageBands || detectHorizontalBands(items,contentBounds);
+
+        if(bands){
+            const rows = bands.map((band,rowIndex) => {
+                const columns = detectColumnsForItems(
+                    band.items,
+                    contentBounds
+                );
+
+                if(!columns || columns.length < 2){
+                    if(!pageBands){
+                        return null;
+                    }
+
+                    const minX = Math.min(...band.items.map(item => item.x));
+                    const maxX = Math.max(
+                        ...band.items.map(item => item.x + item.width)
+                    );
+                    const minY = Math.min(...band.items.map(item => item.minY));
+                    const maxY = Math.max(...band.items.map(item => item.maxY));
+                    const width = maxX - minX;
+                    const height = maxY - minY;
+                    const horizontalPadding = Math.max(
+                        width * .035,
+                        contentBounds.width * .006
+                    );
+                    const verticalPadding = Math.max(
+                        height * .018,
+                        contentBounds.height * .006
+                    );
+
+                    return [{
+                        x:minX - horizontalPadding,
+                        y:minY - verticalPadding,
+                        width:width + horizontalPadding * 2,
+                        height:height + verticalPadding * 2,
+                        rowIndex:rowIndex,
+                        columnIndex:0
+                    }];
+                }
+
+                return columns.map((column,columnIndex) => ({
+                    ...column,
+                    rowIndex:rowIndex,
+                    columnIndex:columnIndex
+                }));
+            });
+
+            /* Every detected row must contain a real column layout. */
+            if(rows.every(Boolean)){
+                return rows.flat();
+            }
+        }
+
+        /* A tall SVG is split only when real horizontal bands were found. */
+        if(contentBounds.width / contentBounds.height < 1.15){
+            return null;
+        }
+
+        const columns = detectColumnsForItems(items,contentBounds);
+        return columns
+            ? columns.map((column,columnIndex) => ({
+                ...column,
+                rowIndex:0,
+                columnIndex:columnIndex
+            }))
+            : null;
     }
 
     function makeIdsUnique(svg,suffix){
@@ -416,13 +662,21 @@ SVG_ZOOM_JS = r"""
             clone.removeAttribute("style");
             clone.removeAttribute("data-zoom-ready");
             clone.querySelectorAll(".svg-zoom-hotspot").forEach(node => node.remove());
-            makeIdsUnique(clone,"mobile-column-" + index);
+            makeIdsUnique(
+                clone,
+                "mobile-row-" + column.rowIndex +
+                "-column-" + column.columnIndex
+            );
             clone.setAttribute(
                 "viewBox",
                 [column.x,column.y,column.width,column.height].join(" ")
             );
             clone.setAttribute("preserveAspectRatio","xMidYMin meet");
-            clone.setAttribute("aria-label","Project column " + (index + 1));
+            clone.setAttribute(
+                "aria-label",
+                "Project row " + (column.rowIndex + 1) +
+                ", column " + (column.columnIndex + 1)
+            );
             frame.appendChild(clone);
             wrapper.appendChild(frame);
             return clone;
