@@ -303,16 +303,6 @@ main{
     overflow-y:hidden;
 }
 
-.pdf-page{
-    display:block;
-    max-width:none;
-    margin:0 auto;
-    padding:0;
-    border:0;
-    outline:0;
-    background:var(--page);
-}
-
 #htmlViewer{
     width:100%;
     background:var(--page);
@@ -1015,12 +1005,6 @@ and Developed by
 
 <script type="module">
 
-import * as pdfjsLib from
-"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
-
 const viewer = document.getElementById("viewer");
 const htmlViewer = document.getElementById("htmlViewer");
 const svgViewer = document.getElementById("svgViewer");
@@ -1069,261 +1053,6 @@ function hideAllViewers(){
         ));
 
 }
-
-function pdfProjectData(url){
-    const manifest = window.PDF_PROJECT_MANIFEST || {};
-    const cleanUrl = url.split("#")[0].split("?")[0];
-    return manifest[cleanUrl] || manifest[decodeURI(cleanUrl)] || null;
-}
-
-function rectanglesIntersect(first,second){
-    return first[0] < second.x + second.width &&
-        first[2] > second.x &&
-        first[1] < second.y + second.height &&
-        first[3] > second.y;
-}
-
-async function renderPdfImageCrop(page,bbox){
-    const width = Math.max(1,bbox[2] - bbox[0]);
-    const height = Math.max(1,bbox[3] - bbox[1]);
-    const scale = Math.min(4,Math.max(2,1800 / width));
-    const viewport = page.getViewport({scale:scale});
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-
-    canvas.width = Math.max(1,Math.ceil(width * scale));
-    canvas.height = Math.max(1,Math.ceil(height * scale));
-
-    await page.render({
-        canvasContext:context,
-        viewport:viewport,
-        transform:[
-            1,
-            0,
-            0,
-            1,
-            -bbox[0] * scale,
-            -bbox[1] * scale
-        ]
-    }).promise;
-
-    return canvas.toDataURL("image/png");
-}
-
-async function addPdfTextLayer(shell,page,region,scale){
-    if(!pdfjsLib.TextLayer){
-        return;
-    }
-
-    const viewport = page.getViewport({scale:scale});
-    const clip = document.createElement("div");
-    const layer = document.createElement("div");
-
-    clip.className = "pdf-text-clip";
-    layer.className = "pdf-text-layer";
-    layer.style.left = (-region.x * scale) + "px";
-    layer.style.top = (-region.y * scale) + "px";
-    layer.style.width = viewport.width + "px";
-    layer.style.height = viewport.height + "px";
-    clip.appendChild(layer);
-    shell.appendChild(clip);
-
-    const textLayer = new pdfjsLib.TextLayer({
-        textContentSource:await page.getTextContent(),
-        container:layer,
-        viewport:viewport
-    });
-    await textLayer.render();
-}
-
-function addPdfImageHotspots(shell,page,pageData,region){
-    if(!pageData){
-        return;
-    }
-
-    if((pageData.text || "").trim()){
-        (pageData.images || []).forEach(image => {
-        if(!rectanglesIntersect(image.bbox,region)){
-            return;
-        }
-
-        const left = Math.max(image.bbox[0],region.x);
-        const top = Math.max(image.bbox[1],region.y);
-        const right = Math.min(image.bbox[2],region.x + region.width);
-        const bottom = Math.min(image.bbox[3],region.y + region.height);
-        const hotspot = document.createElement("button");
-        hotspot.type = "button";
-        hotspot.className = "pdf-image-hotspot";
-        hotspot.setAttribute("aria-label",image.label || "Enlarge image");
-        hotspot.style.left = ((left - region.x) / region.width * 100) + "%";
-        hotspot.style.top = ((top - region.y) / region.height * 100) + "%";
-        hotspot.style.width = ((right - left) / region.width * 100) + "%";
-        hotspot.style.height = ((bottom - top) / region.height * 100) + "%";
-        hotspot.addEventListener("click",async event => {
-            event.preventDefault();
-            event.stopPropagation();
-            hotspot.disabled = true;
-            loading.classList.add("loading-visible");
-            try{
-                const source = await renderPdfImageCrop(page,image.bbox);
-                if(typeof window.openProjectImage === "function"){
-                    window.openProjectImage(source);
-                }
-            }catch(error){
-                console.error("Impossibile ingrandire l'immagine PDF:",error);
-            }finally{
-                hotspot.disabled = false;
-                loading.classList.remove("loading-visible");
-            }
-        });
-        shell.appendChild(hotspot);
-        });
-    }
-
-    (pageData.links || []).forEach(link => {
-        if(!link.url || !rectanglesIntersect(link.bbox,region)){
-            return;
-        }
-
-        const left = Math.max(link.bbox[0],region.x);
-        const top = Math.max(link.bbox[1],region.y);
-        const right = Math.min(link.bbox[2],region.x + region.width);
-        const bottom = Math.min(link.bbox[3],region.y + region.height);
-        const anchor = document.createElement("a");
-        anchor.className = "pdf-link-hotspot";
-        anchor.href = link.url;
-        anchor.target = "_blank";
-        anchor.rel = "noopener noreferrer";
-        anchor.setAttribute("aria-label",link.label || "Open project link");
-        anchor.style.left = ((left - region.x) / region.width * 100) + "%";
-        anchor.style.top = ((top - region.y) / region.height * 100) + "%";
-        anchor.style.width = ((right - left) / region.width * 100) + "%";
-        anchor.style.height = ((bottom - top) / region.height * 100) + "%";
-        shell.appendChild(anchor);
-    });
-}
-
-async function renderPdfRegion(page,pageData,region,targetWidth,className){
-    const scale = targetWidth / region.width;
-    const viewport = page.getViewport({scale:scale});
-    const displayHeight = region.height * scale;
-    const pixelRatio = window.devicePixelRatio || 1;
-    const shell = document.createElement("div");
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-
-    shell.className = className;
-    shell.style.width = targetWidth + "px";
-    shell.style.height = displayHeight + "px";
-
-    canvas.className = "pdf-page";
-    canvas.width = Math.max(1,Math.floor(targetWidth * pixelRatio));
-    canvas.height = Math.max(1,Math.floor(displayHeight * pixelRatio));
-    canvas.style.width = targetWidth + "px";
-    canvas.style.height = displayHeight + "px";
-    shell.appendChild(canvas);
-
-    await page.render({
-        canvasContext:context,
-        viewport:viewport,
-        transform:[
-            pixelRatio,
-            0,
-            0,
-            pixelRatio,
-            -region.x * scale * pixelRatio,
-            -region.y * scale * pixelRatio
-        ]
-    }).promise;
-
-    await addPdfTextLayer(shell,page,region,scale);
-    addPdfImageHotspots(shell,page,pageData,region);
-
-    return shell;
-}
-
-window.loadPDF = async function(url){
-    const renderId = ++currentRenderId;
-
-    closeMobileMenu();
-    hideAllViewers();
-    viewer.style.display = "block";
-    loading.classList.add("loading-visible");
-
-    try{
-        const pdf = await pdfjsLib.getDocument(url).promise;
-
-        if(renderId !== currentRenderId){
-            return;
-        }
-
-        const projectData = pdfProjectData(url);
-        const mobile = window.matchMedia("(max-width:800px)").matches;
-        const availableWidth = viewer.clientWidth;
-        const columnList = mobile ? document.createElement("div") : null;
-
-        if(columnList){
-            columnList.className = "pdf-column-list";
-            viewer.appendChild(columnList);
-        }
-
-        for(let pageNumber = 1;pageNumber <= pdf.numPages;pageNumber++){
-            if(renderId !== currentRenderId){
-                return;
-            }
-
-            const page = await pdf.getPage(pageNumber);
-            const viewport = page.getViewport({scale:1});
-            const pageData = projectData?.pages?.[pageNumber - 1] || null;
-            const detectedColumns = pageData?.columns || [];
-
-            if(mobile && detectedColumns.length >= 2){
-                const targetWidth = Math.max(1,columnList.clientWidth);
-
-                for(const column of detectedColumns){
-                    const shell = await renderPdfRegion(
-                        page,
-                        pageData,
-                        column,
-                        targetWidth,
-                        "pdf-column-shell"
-                    );
-                    columnList.appendChild(shell);
-                }
-            }
-            else{
-                const region = {
-                    x:0,
-                    y:0,
-                    width:viewport.width,
-                    height:viewport.height
-                };
-                const shell = await renderPdfRegion(
-                    page,
-                    pageData,
-                    region,
-                    availableWidth,
-                    "pdf-page-shell"
-                );
-                viewer.appendChild(shell);
-            }
-        }
-
-        loading.classList.remove("loading-visible");
-        revealProject(viewer);
-        window.scrollTo({top:0,behavior:"smooth"});
-    }
-    catch(error){
-        if(renderId !== currentRenderId){
-            return;
-        }
-
-        loading.classList.remove("loading-visible");
-        viewer.innerHTML =
-        "<p style='padding:40px;text-align:center'>Unable to load PDF.</p>";
-        console.error(error);
-    }
-};
 
 window.loadSVG = async function(url){
 
@@ -1677,18 +1406,9 @@ function searchableLinks(){
         .map(link => ({
             label:link.textContent.trim(),
             link:link,
-            svgUrl:extractSvgUrl(link),
-            pdfUrl:extractPdfUrl(link)
+            svgUrl:extractSvgUrl(link)
         }))
         .filter(item => item.label);
-
-}
-
-function extractPdfUrl(link){
-
-    const handler = link.getAttribute("onclick") || "";
-    const match = handler.match(/loadPDF\(\s*(["'])(.*?)\1\s*\)/);
-    return match ? match[2] : null;
 
 }
 
@@ -1719,7 +1439,6 @@ function buildSearchIndex(){
 
     searchIndexPromise = Promise.all(items.map(async item => {
         let svgContent = "";
-        let pdfContent = "";
 
         if(item.svgUrl){
             try{
@@ -1741,15 +1460,10 @@ function buildSearchIndex(){
             }
         }
 
-        if(item.pdfUrl){
-            const pdfData = pdfProjectData(item.pdfUrl);
-            pdfContent = pdfData?.text || "";
-        }
-
         return {
             ...item,
             searchableText:normalizeSearchText(
-                item.label + " " + svgContent + " " + pdfContent
+                item.label + " " + svgContent
             )
         };
     }));

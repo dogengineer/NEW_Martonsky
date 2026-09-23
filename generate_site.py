@@ -1,18 +1,26 @@
 from pathlib import Path
+import base64
+import hashlib
 import html
 import re
 import json
+import sys
 import xml.etree.ElementTree as ET
+from io import BytesIO
 
-try:
-    import pymupdf as fitz  # PDF text, image and layout analysis
-except ImportError:
-    fitz = None
+import pymupdf
+from fontTools.agl import AGL2UV
+from fontTools.cffLib import CFFFontSet
+from fontTools.fontBuilder import FontBuilder
 
 BASE_DIR = Path("pdf")
 TEMPLATE_FILE = Path("site_template.html")
 OUTPUT_FILE = Path("index.html")
-SUPPORTED_EXTENSIONS = {".pdf", ".html", ".htm", ".svg"}
+SUPPORTED_EXTENSIONS = {".html", ".htm", ".svg"}
+SVG_NS = "http://www.w3.org/2000/svg"
+XLINK_NS = "http://www.w3.org/1999/xlink"
+ET.register_namespace("", SVG_NS)
+ET.register_namespace("xlink", XLINK_NS)
 
 SVG_ZOOM_CSS = r"""
 /* Automatic SVG image zoom, injected by generate_site.py */
@@ -52,87 +60,6 @@ SVG_ZOOM_CSS = r"""
     margin:0 !important;
     background:#fff;
     overflow:hidden;
-}
-
-.pdf-page-shell,
-.pdf-column-shell{
-    position:relative;
-    overflow:hidden;
-    margin-left:auto;
-    margin-right:auto;
-    background:#fff;
-}
-
-.pdf-column-list{
-    display:flex;
-    flex-direction:column;
-    gap:28px;
-    width:100%;
-    box-sizing:border-box;
-    padding:18px clamp(14px,4vw,24px) 32px;
-    background:#fff;
-}
-
-.pdf-image-hotspot{
-    position:absolute;
-    z-index:3;
-    display:block;
-    border:0;
-    padding:0;
-    background:transparent;
-    cursor:zoom-in;
-}
-
-.pdf-link-hotspot{
-    position:absolute;
-    z-index:4;
-    display:block;
-    background:transparent;
-}
-
-.pdf-link-hotspot:focus-visible{
-    outline:2px solid #111;
-    outline-offset:2px;
-}
-
-.pdf-image-hotspot:focus-visible{
-    outline:2px solid #111;
-    outline-offset:2px;
-}
-
-.pdf-text-clip{
-    position:absolute;
-    inset:0;
-    z-index:2;
-    overflow:hidden;
-    pointer-events:none;
-}
-
-.pdf-text-layer{
-    position:absolute;
-    margin:0;
-    padding:0;
-    overflow:hidden;
-    line-height:1;
-    text-align:initial;
-    text-size-adjust:none;
-    forced-color-adjust:none;
-    transform-origin:0 0;
-    pointer-events:auto;
-}
-
-.pdf-text-layer span,
-.pdf-text-layer br{
-    position:absolute;
-    color:transparent;
-    white-space:pre;
-    cursor:text;
-    transform-origin:0 0;
-}
-
-.pdf-text-layer ::selection{
-    color:transparent;
-    background:rgba(40,110,255,.28);
 }
 
 #svgImageLightbox{
@@ -200,10 +127,6 @@ SVG_ZOOM_CSS = r"""
 
     #viewer{
         overflow-x:hidden;
-    }
-
-    .pdf-column-list{
-        gap:24px;
     }
 
     #svgImageLightbox{
@@ -717,9 +640,7 @@ def file_link(path: Path, label: str) -> str:
     js_url = html.escape(json.dumps(url), quote=True)
     extension = path.suffix.lower()
 
-    if extension == ".pdf":
-        action = f"loadPDF({js_url})"
-    elif extension == ".svg":
+    if extension == ".svg":
         action = f"loadSVG({js_url})"
     else:
         action = f"loadHTML({js_url})"
@@ -915,183 +836,394 @@ def analyze_svg_images():
 
     return manifest
 
-def _pdf_rect_values(rect):
-    return [
-        round(float(rect.x0), 3),
-        round(float(rect.y0), 3),
-        round(float(rect.x1), 3),
-        round(float(rect.y1), 3),
-    ]
+def _font_family_and_style(font_name: str) -> tuple[str, str, str]:
+    name = font_name.split("+", 1)[-1]
+    style = "normal"
+    weight = "400"
+    if name.endswith("-Italic"):
+        name = name[:-7]
+        style = "italic"
+    if name.endswith("-Bold"):
+        name = name[:-5]
+        weight = "700"
+    if name.endswith("-Regular"):
+        name = name[:-8]
+    return name, style, weight
 
-def detect_pdf_columns(page_width, page_height, rectangles, has_text):
-    """Find clear vertical columns from whitespace between PDF elements."""
-    if not has_text or page_width / max(page_height, 1) < 1.15:
-        return []
 
-    intervals = []
-    for rect in rectangles:
-        x0 = max(0.0, min(page_width, float(rect.x0)))
-        x1 = max(0.0, min(page_width, float(rect.x1)))
-        if x1 - x0 >= page_width * 0.025:
-            intervals.append([x0, x1])
+def _cff_to_opentype_font(data: bytes, ps_name: str) -> bytes:
+    cff = CFFFontSet()
+    cff.decompile(BytesIO(data), None)
+    top = cff.topDictIndex[0]
+    glyph_order = list(top.CharStrings.charStrings.keys())
+    cmap = {}
+    for glyph_name in glyph_order:
+        codepoint = AGL2UV.get(glyph_name)
+        if codepoint is not None:
+            cmap[codepoint] = glyph_name
 
-    intervals.sort(key=lambda item: (item[0], item[1]))
-    if len(intervals) < 3:
-        return []
+    builder = FontBuilder(1000, isTTF=False)
+    builder.setupGlyphOrder(glyph_order)
+    builder.setupCharacterMap(cmap)
+    builder.setupHorizontalMetrics({glyph: (600, 0) for glyph in glyph_order})
+    builder.setupHorizontalHeader(ascent=900, descent=-300)
+    builder.setupOS2(
+        sTypoAscender=900,
+        sTypoDescender=-300,
+        usWinAscent=1000,
+        usWinDescent=300,
+    )
+    builder.setupNameTable({
+        "familyName": ps_name,
+        "styleName": "Regular",
+        "fullName": ps_name,
+        "psName": ps_name,
+    })
+    builder.setupPost()
+    builder.setupCFF(
+        ps_name,
+        {
+            "FontBBox": getattr(top, "FontBBox", [-200, -300, 1200, 1000]),
+            "Weight": getattr(top, "Weight", "Regular"),
+        },
+        {
+            glyph_name: top.CharStrings[glyph_name]
+            for glyph_name in glyph_order
+        },
+        dict(top.Private.rawDict),
+    )
+    output = BytesIO()
+    builder.save(output)
+    return output.getvalue()
 
-    join_tolerance = page_width * 0.006
-    groups = []
-    for x0, x1 in intervals:
-        if not groups or x0 > groups[-1][1] + join_tolerance:
-            groups.append([x0, x1])
-        else:
-            groups[-1][1] = max(groups[-1][1], x1)
 
-    groups = [
-        group for group in groups
-        if group[1] - group[0] >= page_width * 0.12
-    ]
+def extract_embedded_fonts(document: pymupdf.Document):
+    faces = {}
+    seen_xrefs = set()
+    for page in document:
+        for font in page.get_fonts(full=True):
+            xref = int(font[0])
+            if not xref or xref in seen_xrefs:
+                continue
+            seen_xrefs.add(xref)
+            try:
+                original_name, extension, _font_type, raw_data = (
+                    document.extract_font(xref)
+                )
+                family, style, weight = _font_family_and_style(original_name)
+                if extension.lower() == "ttf":
+                    font_data = raw_data
+                    mime = "font/ttf"
+                    format_name = "truetype"
+                elif extension.lower() == "cff":
+                    font_data = _cff_to_opentype_font(raw_data, family)
+                    mime = "font/otf"
+                    format_name = "opentype"
+                else:
+                    continue
+                faces[original_name.split("+", 1)[-1]] = {
+                    "family": family,
+                    "style": style,
+                    "weight": weight,
+                    "src": (
+                        f"data:{mime};base64,"
+                        f"{base64.b64encode(font_data).decode('ascii')}"
+                    ),
+                    "format": format_name,
+                }
+            except Exception as error:
+                print(
+                    f"ATTENZIONE: font PDF {xref} non incorporato: {error}",
+                    file=sys.stderr,
+                )
+    return faces
 
-    if not 2 <= len(groups) <= 4:
-        return []
 
-    # InDesign spreads often use a narrow but deliberate gutter. 1.2% keeps
-    # those columns separate without treating ordinary word/paragraph gaps as
-    # independent columns.
-    minimum_gap = page_width * 0.012
-    if any(
-        groups[index + 1][0] - groups[index][1] < minimum_gap
-        for index in range(len(groups) - 1)
-    ):
-        return []
+def add_font_styles(root: ET.Element, faces) -> None:
+    if not faces:
+        return
+    style = ET.Element(f"{{{SVG_NS}}}style", {"type": "text/css"})
+    rules = []
+    for face in faces.values():
+        rules.append(
+            "@font-face{"
+            f"font-family:'{face['family']}';"
+            f"font-style:{face['style']};"
+            f"font-weight:{face['weight']};"
+            f"src:url({face['src']}) format('{face['format']}');"
+            "}"
+        )
+    style.text = "".join(rules)
+    root.insert(0, style)
 
-    padding = page_width * 0.012
-    columns = []
-    for index, (x0, x1) in enumerate(groups):
-        left_padding = padding
-        right_padding = padding
-        if index > 0:
-            previous_gap = x0 - groups[index - 1][1]
-            left_padding = min(padding, previous_gap * 0.45)
-        if index + 1 < len(groups):
-            next_gap = groups[index + 1][0] - x1
-            right_padding = min(padding, next_gap * 0.45)
 
-        left = max(0.0, x0 - left_padding)
-        right = min(page_width, x1 + right_padding)
-        columns.append({
-            "x": round(left, 3),
-            "y": 0.0,
-            "width": round(right - left, 3),
-            "height": round(page_height, 3),
-        })
+def prefix_svg_references(root: ET.Element, prefix: str) -> None:
+    replacements = {}
+    for element in root.iter():
+        old_id = element.get("id")
+        if old_id:
+            new_id = f"{prefix}{old_id}"
+            replacements[old_id] = new_id
+            element.set("id", new_id)
 
-    return columns
+    if not replacements:
+        return
 
-def analyze_pdf_projects():
-    """Extract searchable text, image bounds and mobile columns from PDFs."""
-    manifest = {}
+    url_pattern = re.compile(r"url\(#([^)]+)\)")
+    for element in root.iter():
+        for attribute, value in list(element.attrib.items()):
+            if value.startswith("#") and value[1:] in replacements:
+                element.set(attribute, f"#{replacements[value[1:]]}")
+                continue
 
-    if not BASE_DIR.is_dir():
-        return manifest
+            def replace_url(match):
+                identifier = match.group(1)
+                return f"url(#{replacements.get(identifier, identifier)})"
 
-    pdf_files = sorted(
-        BASE_DIR.rglob("*.pdf"),
-        key=lambda path: path.as_posix().lower(),
+            element.set(attribute, url_pattern.sub(replace_url, value))
+
+
+def append_searchable_text_layer(group, page, page_number, faces) -> int:
+    layer = ET.SubElement(
+        group,
+        f"{{{SVG_NS}}}g",
+        {
+            "id": f"pdf-searchable-text-{page_number}",
+            "class": "pdf-searchable-text",
+            "fill": "#000000",
+            "fill-opacity": "0.001",
+            "stroke": "none",
+            "pointer-events": "all",
+            "style": "user-select:text;-webkit-user-select:text",
+            "aria-label": f"Selectable text, page {page_number}",
+        },
     )
 
-    if pdf_files and fitz is None:
-        print(
-            "ATTENZIONE: PyMuPDF non installato. "
-            "Esegui: python3 -m pip install pymupdf"
-        )
-        return manifest
+    count = 0
+    for block in page.get_text("rawdict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            line_element = ET.SubElement(
+                layer,
+                f"{{{SVG_NS}}}text",
+                {
+                    "xml:space": "preserve",
+                    "aria-label": "".join(
+                        character.get("c", "")
+                        for span in line.get("spans", [])
+                        for character in span.get("chars", [])
+                    ),
+                },
+            )
+            line_has_text = False
+            for span in line.get("spans", []):
+                characters = [
+                    character
+                    for character in span.get("chars", [])
+                    if character.get("c")
+                    and character.get("origin")
+                    and character.get("bbox")
+                ]
+                if not characters:
+                    continue
 
-    for pdf_path in pdf_files:
-        url = pdf_path.as_posix()
-        try:
-            document = fitz.open(pdf_path)
-            pages = []
-            all_text = []
-
-            for page_index, page in enumerate(document):
-                page_width = float(page.rect.width)
-                page_height = float(page.rect.height)
-                page_text = page.get_text("text").strip()
-                if page_text:
-                    all_text.append(page_text)
-
-                text_rectangles = []
-                for block in page.get_text("blocks"):
-                    if len(block) > 6 and block[6] == 0 and str(block[4]).strip():
-                        text_rectangles.append(fitz.Rect(block[:4]))
-
-                images = []
-                image_rectangles = []
-                for image_number, image_info in enumerate(
-                    page.get_image_info(xrefs=True),
-                    start=1,
-                ):
-                    bbox = fitz.Rect(image_info["bbox"])
-                    if bbox.width <= 1 or bbox.height <= 1:
-                        continue
-
-                    image_rectangles.append(bbox)
-                    images.append({
-                        "bbox": _pdf_rect_values(bbox),
-                        "label": f"Enlarge image {image_number}",
-                    })
-
-                columns = detect_pdf_columns(
-                    page_width,
-                    page_height,
-                    text_rectangles + image_rectangles,
-                    bool(page_text),
+                content = "".join(character["c"] for character in characters)
+                first_origin = characters[0]["origin"]
+                first_bbox = characters[0]["bbox"]
+                last_bbox = characters[-1]["bbox"]
+                width = max(0.01, float(last_bbox[2]) - float(first_bbox[0]))
+                font_size = float(span.get("size", 12))
+                face = faces.get(span.get("font", ""))
+                span_element = ET.SubElement(
+                    line_element,
+                    f"{{{SVG_NS}}}tspan",
+                    {
+                        "x": f"{float(first_origin[0]):.4f}",
+                        "y": f"{float(first_origin[1]):.4f}",
+                        "font-size": f"{font_size:.4f}",
+                        "font-family": (
+                            f"'{face['family']}'" if face else "sans-serif"
+                        ),
+                        "font-style": face["style"] if face else "normal",
+                        "font-weight": face["weight"] if face else "400",
+                        "textLength": f"{width:.4f}",
+                        "lengthAdjust": "spacingAndGlyphs",
+                        "xml:space": "preserve",
+                    },
                 )
+                span_element.text = content
+                line_has_text = True
 
-                links = []
-                for target in sorted(set(re.findall(
-                    r"https?://[^\s\]\)>]+",
-                    page_text,
-                    flags=re.I,
-                ))):
-                    for link_rect in page.search_for(target):
-                        links.append({
-                            "bbox": _pdf_rect_values(link_rect),
-                            "url": target,
-                            "label": f"Open link {target}",
-                        })
+            if line_has_text:
+                line_element.tail = "\n"
+                count += 1
+            else:
+                layer.remove(line_element)
+    return count
 
-                pages.append({
-                    "page": page_index + 1,
-                    "width": round(page_width, 3),
-                    "height": round(page_height, 3),
-                    "columns": columns,
-                    "images": images,
-                    "links": links,
-                    "text": page_text,
-                })
 
-            document.close()
-            manifest[url] = {
-                "text": "\n".join(all_text),
-                "pages": pages,
-                "images": sum(len(page["images"]) for page in pages),
-                "column_pages": sum(bool(page["columns"]) for page in pages),
-            }
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
+
+def converted_svg_matches(svg_path: Path, pdf_hash: str) -> bool:
+    try:
+        _event, root = next(ET.iterparse(svg_path, events=("start",)))
+        return root.get("data-source-pdf-sha256") == pdf_hash
+    except (ET.ParseError, OSError, StopIteration):
+        return False
+
+
+def convert_pdf_to_svg(
+    source: Path,
+    destination: Path,
+    page_gap=32.0,
+    source_hash=None,
+):
+    document = pymupdf.open(source)
+    if document.page_count == 0:
+        document.close()
+        raise ValueError(f"Il PDF non contiene pagine: {source}")
+
+    page_sizes = [
+        (float(page.rect.width), float(page.rect.height))
+        for page in document
+    ]
+    output_width = max(width for width, _height in page_sizes)
+    output_height = (
+        sum(height for _width, height in page_sizes)
+        + page_gap * (document.page_count - 1)
+    )
+    outer = ET.Element(
+        f"{{{SVG_NS}}}svg",
+        {
+            "version": "1.1",
+            "width": f"{output_width:g}",
+            "height": f"{output_height:g}",
+            "viewBox": f"0 0 {output_width:g} {output_height:g}",
+            "data-source-pdf": source.name,
+            "data-source-pdf-sha256": source_hash or file_sha256(source),
+            "data-page-count": str(document.page_count),
+        },
+    )
+    embedded_fonts = extract_embedded_fonts(document)
+    add_font_styles(outer, embedded_fonts)
+    title = ET.SubElement(outer, f"{{{SVG_NS}}}title")
+    title.text = source.stem
+
+    current_y = 0.0
+    image_count = 0
+    text_count = 0
+    for page_number, page in enumerate(document, start=1):
+        width, height = page_sizes[page_number - 1]
+        page_root = ET.fromstring(page.get_svg_image(text_as_path=True))
+        prefix_svg_references(page_root, f"p{page_number}_")
+        group = ET.SubElement(
+            outer,
+            f"{{{SVG_NS}}}g",
+            {
+                "id": f"pdf-page-{page_number}",
+                "data-page": str(page_number),
+                "transform": f"translate({(output_width - width) / 2:g} {current_y:g})",
+            },
+        )
+        ET.SubElement(
+            group,
+            f"{{{SVG_NS}}}rect",
+            {
+                "x": "0",
+                "y": "0",
+                "width": f"{width:g}",
+                "height": f"{height:g}",
+                "fill": "white",
+            },
+        )
+        for child in list(page_root):
+            group.append(child)
+
+        text_count += append_searchable_text_layer(
+            group, page, page_number, embedded_fonts
+        )
+        image_count += sum(
+            1 for element in page_root.iter()
+            if local_tag_name(element.tag) == "image"
+        )
+        current_y += height + page_gap
+
+    document.close()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(outer).write(
+        destination,
+        encoding="utf-8",
+        xml_declaration=True,
+    )
+    return {
+        "pages": len(page_sizes),
+        "images": image_count,
+        "text_elements": text_count,
+        "bytes": destination.stat().st_size,
+    }
+
+
+def convert_project_pdfs(force=False):
+    """Convert PDFs beside their source; the website itself only sees SVGs."""
+    results = []
+    if not BASE_DIR.is_dir():
+        return results
+
+    pdf_files = sorted(
+        (
+            path for path in BASE_DIR.rglob("*")
+            if path.is_file() and path.suffix.lower() == ".pdf"
+        ),
+        key=lambda path: path.as_posix().lower(),
+    )
+    for pdf_path in pdf_files:
+        svg_path = pdf_path.with_suffix(".svg")
+        pdf_hash = file_sha256(pdf_path)
+        if (
+            not force
+            and svg_path.exists()
+            and converted_svg_matches(svg_path, pdf_hash)
+        ):
+            results.append({
+                "pdf": pdf_path,
+                "svg": svg_path,
+                "status": "aggiornato",
+            })
+            continue
+
+        temporary_path = svg_path.with_name(svg_path.name + ".tmp")
+        try:
+            info = convert_pdf_to_svg(
+                pdf_path,
+                temporary_path,
+                source_hash=pdf_hash,
+            )
+            temporary_path.replace(svg_path)
+            results.append({
+                "pdf": pdf_path,
+                "svg": svg_path,
+                "status": "convertito",
+                **info,
+            })
         except Exception as error:
-            manifest[url] = {
-                "text": "",
-                "pages": [],
-                "images": 0,
-                "column_pages": 0,
+            if temporary_path.exists():
+                temporary_path.unlink()
+            results.append({
+                "pdf": pdf_path,
+                "svg": svg_path,
+                "status": "errore",
                 "error": str(error),
-            }
+            })
+    return results
 
-    return manifest
-
-def inject_project_runtime(template: str, svg_manifest, pdf_manifest) -> str:
+def inject_project_runtime(template: str, svg_manifest) -> str:
     """Inject the reusable lightbox without modifying the source SVG files."""
     marker = "Automatic SVG image zoom, injected by generate_site.py"
 
@@ -1107,8 +1239,6 @@ def inject_project_runtime(template: str, svg_manifest, pdf_manifest) -> str:
     manifest_script = (
         "<script>window.SVG_IMAGE_MANIFEST = "
         + json.dumps(svg_manifest, ensure_ascii=False)
-        + ";window.PDF_PROJECT_MANIFEST = "
-        + json.dumps(pdf_manifest, ensure_ascii=False)
         + ";</script>"
     )
 
@@ -1133,10 +1263,35 @@ def inject_project_runtime(template: str, svg_manifest, pdf_manifest) -> str:
     )
 
 def main():
+    force_conversion = "--force-pdf-conversion" in sys.argv[1:]
+    conversion_results = convert_project_pdfs(force=force_conversion)
+    converted_count = sum(
+        item["status"] == "convertito" for item in conversion_results
+    )
+    skipped_count = sum(
+        item["status"] == "aggiornato" for item in conversion_results
+    )
+    conversion_error_count = sum(
+        item["status"] == "errore" for item in conversion_results
+    )
+    print(f"PDF convertiti in SVG: {converted_count}")
+    print(f"SVG già aggiornati: {skipped_count}")
+    for item in conversion_results:
+        if item["status"] == "convertito":
+            print(f"  - {item['pdf']} -> {item['svg']}")
+        elif item["status"] == "errore":
+            print(
+                f"  - ERRORE {item['pdf']}: {item['error']}",
+                file=sys.stderr,
+            )
+    if conversion_error_count:
+        raise RuntimeError(
+            f"Conversione fallita per {conversion_error_count} PDF"
+        )
+
     template = TEMPLATE_FILE.read_text(encoding="utf-8")
     navigation = render_navigation()
     svg_manifest = analyze_svg_images()
-    pdf_manifest = analyze_pdf_projects()
 
     if "{{NAVIGATION}}" not in template:
         raise RuntimeError(
@@ -1144,7 +1299,7 @@ def main():
         )
 
     output = template.replace("{{NAVIGATION}}", navigation)
-    output = inject_project_runtime(output, svg_manifest, pdf_manifest)
+    output = inject_project_runtime(output, svg_manifest)
     OUTPUT_FILE.write_text(output, encoding="utf-8")
 
     print(f"Creato {OUTPUT_FILE}")
@@ -1174,29 +1329,6 @@ def main():
                 f"({info['embedded']} incorporate, "
                 f"{info['external']} esterne; {zoom_status})"
             )
-
-    pdf_image_count = sum(item["images"] for item in pdf_manifest.values())
-    pdf_column_pages = sum(
-        item["column_pages"] for item in pdf_manifest.values()
-    )
-    pdf_error_count = sum("error" in item for item in pdf_manifest.values())
-
-    print(f"PDF analizzati: {len(pdf_manifest)}")
-    print(f"Immagini PDF rilevate: {pdf_image_count}")
-    print(f"Pagine PDF con colonne mobili: {pdf_column_pages}")
-
-    if pdf_error_count:
-        print(f"PDF non analizzati per errore: {pdf_error_count}")
-
-    for pdf_path, info in pdf_manifest.items():
-        status = (
-            f"{info['column_pages']} pagine a colonne"
-            if info["column_pages"]
-            else "layout mobile standard"
-        )
-        print(
-            f"  - {pdf_path}: {info['images']} immagini; {status}"
-        )
 
 if __name__ == "__main__":
     main()

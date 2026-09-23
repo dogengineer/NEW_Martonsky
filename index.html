@@ -303,16 +303,6 @@ main{
     overflow-y:hidden;
 }
 
-.pdf-page{
-    display:block;
-    max-width:none;
-    margin:0 auto;
-    padding:0;
-    border:0;
-    outline:0;
-    background:var(--page);
-}
-
 #htmlViewer{
     width:100%;
     background:var(--page);
@@ -943,87 +933,6 @@ footer a:hover{
     overflow:hidden;
 }
 
-.pdf-page-shell,
-.pdf-column-shell{
-    position:relative;
-    overflow:hidden;
-    margin-left:auto;
-    margin-right:auto;
-    background:#fff;
-}
-
-.pdf-column-list{
-    display:flex;
-    flex-direction:column;
-    gap:28px;
-    width:100%;
-    box-sizing:border-box;
-    padding:18px clamp(14px,4vw,24px) 32px;
-    background:#fff;
-}
-
-.pdf-image-hotspot{
-    position:absolute;
-    z-index:3;
-    display:block;
-    border:0;
-    padding:0;
-    background:transparent;
-    cursor:zoom-in;
-}
-
-.pdf-link-hotspot{
-    position:absolute;
-    z-index:4;
-    display:block;
-    background:transparent;
-}
-
-.pdf-link-hotspot:focus-visible{
-    outline:2px solid #111;
-    outline-offset:2px;
-}
-
-.pdf-image-hotspot:focus-visible{
-    outline:2px solid #111;
-    outline-offset:2px;
-}
-
-.pdf-text-clip{
-    position:absolute;
-    inset:0;
-    z-index:2;
-    overflow:hidden;
-    pointer-events:none;
-}
-
-.pdf-text-layer{
-    position:absolute;
-    margin:0;
-    padding:0;
-    overflow:hidden;
-    line-height:1;
-    text-align:initial;
-    text-size-adjust:none;
-    forced-color-adjust:none;
-    transform-origin:0 0;
-    pointer-events:auto;
-}
-
-.pdf-text-layer span,
-.pdf-text-layer br{
-    position:absolute;
-    color:transparent;
-    white-space:pre;
-    cursor:text;
-    transform-origin:0 0;
-}
-
-.pdf-text-layer ::selection{
-    color:transparent;
-    background:rgba(40,110,255,.28);
-}
-
 #svgImageLightbox{
     position:fixed;
     inset:0;
@@ -1089,10 +998,6 @@ footer a:hover{
 
     #viewer{
         overflow-x:hidden;
-    }
-
-    .pdf-column-list{
-        gap:24px;
     }
 
     #svgImageLightbox{
@@ -1162,9 +1067,10 @@ footer a:hover{
 <li><span class="menu-label empty-section">Contact</span></li>
 <li><a href="#" onclick="loadHTML(&quot;pdf/07_Animations/01_Animations.html&quot;);return false;">Animations</a></li>
 <li class="top-menu-item"><span class="menu-label">PDF test</span><ul class="submenu">
-<li><a href="#" onclick="loadPDF(&quot;pdf/08_PDF test/1_BHS EXHIBITION pdf.pdf&quot;);return false;">BHS EXHIBITION pdf</a></li>
-<li><a href="#" onclick="loadPDF(&quot;pdf/08_PDF test/2_project_BHS pdf.pdf&quot;);return false;">project_BHS pdf</a></li>
-<li><a href="#" onclick="loadPDF(&quot;pdf/08_PDF test/3_slime mold project pdf.pdf&quot;);return false;">slime mold project pdf</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/08_PDF test/1_BHS EXHIBITION pdf.svg&quot;);return false;">BHS EXHIBITION pdf</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/08_PDF test/2_project_BHS_2222 pdf.svg&quot;);return false;">project_BHS_2222 pdf</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/08_PDF test/3_slime mold project pdf.svg&quot;);return false;">slime mold project pdf</a></li>
+<li><a href="#" onclick="loadSVG(&quot;pdf/08_PDF test/BHS_EXHIBITION_embedded_fonts_test.svg&quot;);return false;">BHS_EXHIBITION_embedded_fonts_test</a></li>
 </ul></li>
 <li><a href="#" onclick="loadContact();return false;">CONTACT</a></li>
 </ul>
@@ -1261,12 +1167,6 @@ and Developed by
 
 <script type="module">
 
-import * as pdfjsLib from
-"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
-
 const viewer = document.getElementById("viewer");
 const htmlViewer = document.getElementById("htmlViewer");
 const svgViewer = document.getElementById("svgViewer");
@@ -1315,261 +1215,6 @@ function hideAllViewers(){
         ));
 
 }
-
-function pdfProjectData(url){
-    const manifest = window.PDF_PROJECT_MANIFEST || {};
-    const cleanUrl = url.split("#")[0].split("?")[0];
-    return manifest[cleanUrl] || manifest[decodeURI(cleanUrl)] || null;
-}
-
-function rectanglesIntersect(first,second){
-    return first[0] < second.x + second.width &&
-        first[2] > second.x &&
-        first[1] < second.y + second.height &&
-        first[3] > second.y;
-}
-
-async function renderPdfImageCrop(page,bbox){
-    const width = Math.max(1,bbox[2] - bbox[0]);
-    const height = Math.max(1,bbox[3] - bbox[1]);
-    const scale = Math.min(4,Math.max(2,1800 / width));
-    const viewport = page.getViewport({scale:scale});
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-
-    canvas.width = Math.max(1,Math.ceil(width * scale));
-    canvas.height = Math.max(1,Math.ceil(height * scale));
-
-    await page.render({
-        canvasContext:context,
-        viewport:viewport,
-        transform:[
-            1,
-            0,
-            0,
-            1,
-            -bbox[0] * scale,
-            -bbox[1] * scale
-        ]
-    }).promise;
-
-    return canvas.toDataURL("image/png");
-}
-
-async function addPdfTextLayer(shell,page,region,scale){
-    if(!pdfjsLib.TextLayer){
-        return;
-    }
-
-    const viewport = page.getViewport({scale:scale});
-    const clip = document.createElement("div");
-    const layer = document.createElement("div");
-
-    clip.className = "pdf-text-clip";
-    layer.className = "pdf-text-layer";
-    layer.style.left = (-region.x * scale) + "px";
-    layer.style.top = (-region.y * scale) + "px";
-    layer.style.width = viewport.width + "px";
-    layer.style.height = viewport.height + "px";
-    clip.appendChild(layer);
-    shell.appendChild(clip);
-
-    const textLayer = new pdfjsLib.TextLayer({
-        textContentSource:await page.getTextContent(),
-        container:layer,
-        viewport:viewport
-    });
-    await textLayer.render();
-}
-
-function addPdfImageHotspots(shell,page,pageData,region){
-    if(!pageData){
-        return;
-    }
-
-    if((pageData.text || "").trim()){
-        (pageData.images || []).forEach(image => {
-        if(!rectanglesIntersect(image.bbox,region)){
-            return;
-        }
-
-        const left = Math.max(image.bbox[0],region.x);
-        const top = Math.max(image.bbox[1],region.y);
-        const right = Math.min(image.bbox[2],region.x + region.width);
-        const bottom = Math.min(image.bbox[3],region.y + region.height);
-        const hotspot = document.createElement("button");
-        hotspot.type = "button";
-        hotspot.className = "pdf-image-hotspot";
-        hotspot.setAttribute("aria-label",image.label || "Enlarge image");
-        hotspot.style.left = ((left - region.x) / region.width * 100) + "%";
-        hotspot.style.top = ((top - region.y) / region.height * 100) + "%";
-        hotspot.style.width = ((right - left) / region.width * 100) + "%";
-        hotspot.style.height = ((bottom - top) / region.height * 100) + "%";
-        hotspot.addEventListener("click",async event => {
-            event.preventDefault();
-            event.stopPropagation();
-            hotspot.disabled = true;
-            loading.classList.add("loading-visible");
-            try{
-                const source = await renderPdfImageCrop(page,image.bbox);
-                if(typeof window.openProjectImage === "function"){
-                    window.openProjectImage(source);
-                }
-            }catch(error){
-                console.error("Impossibile ingrandire l'immagine PDF:",error);
-            }finally{
-                hotspot.disabled = false;
-                loading.classList.remove("loading-visible");
-            }
-        });
-        shell.appendChild(hotspot);
-        });
-    }
-
-    (pageData.links || []).forEach(link => {
-        if(!link.url || !rectanglesIntersect(link.bbox,region)){
-            return;
-        }
-
-        const left = Math.max(link.bbox[0],region.x);
-        const top = Math.max(link.bbox[1],region.y);
-        const right = Math.min(link.bbox[2],region.x + region.width);
-        const bottom = Math.min(link.bbox[3],region.y + region.height);
-        const anchor = document.createElement("a");
-        anchor.className = "pdf-link-hotspot";
-        anchor.href = link.url;
-        anchor.target = "_blank";
-        anchor.rel = "noopener noreferrer";
-        anchor.setAttribute("aria-label",link.label || "Open project link");
-        anchor.style.left = ((left - region.x) / region.width * 100) + "%";
-        anchor.style.top = ((top - region.y) / region.height * 100) + "%";
-        anchor.style.width = ((right - left) / region.width * 100) + "%";
-        anchor.style.height = ((bottom - top) / region.height * 100) + "%";
-        shell.appendChild(anchor);
-    });
-}
-
-async function renderPdfRegion(page,pageData,region,targetWidth,className){
-    const scale = targetWidth / region.width;
-    const viewport = page.getViewport({scale:scale});
-    const displayHeight = region.height * scale;
-    const pixelRatio = window.devicePixelRatio || 1;
-    const shell = document.createElement("div");
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-
-    shell.className = className;
-    shell.style.width = targetWidth + "px";
-    shell.style.height = displayHeight + "px";
-
-    canvas.className = "pdf-page";
-    canvas.width = Math.max(1,Math.floor(targetWidth * pixelRatio));
-    canvas.height = Math.max(1,Math.floor(displayHeight * pixelRatio));
-    canvas.style.width = targetWidth + "px";
-    canvas.style.height = displayHeight + "px";
-    shell.appendChild(canvas);
-
-    await page.render({
-        canvasContext:context,
-        viewport:viewport,
-        transform:[
-            pixelRatio,
-            0,
-            0,
-            pixelRatio,
-            -region.x * scale * pixelRatio,
-            -region.y * scale * pixelRatio
-        ]
-    }).promise;
-
-    await addPdfTextLayer(shell,page,region,scale);
-    addPdfImageHotspots(shell,page,pageData,region);
-
-    return shell;
-}
-
-window.loadPDF = async function(url){
-    const renderId = ++currentRenderId;
-
-    closeMobileMenu();
-    hideAllViewers();
-    viewer.style.display = "block";
-    loading.classList.add("loading-visible");
-
-    try{
-        const pdf = await pdfjsLib.getDocument(url).promise;
-
-        if(renderId !== currentRenderId){
-            return;
-        }
-
-        const projectData = pdfProjectData(url);
-        const mobile = window.matchMedia("(max-width:800px)").matches;
-        const availableWidth = viewer.clientWidth;
-        const columnList = mobile ? document.createElement("div") : null;
-
-        if(columnList){
-            columnList.className = "pdf-column-list";
-            viewer.appendChild(columnList);
-        }
-
-        for(let pageNumber = 1;pageNumber <= pdf.numPages;pageNumber++){
-            if(renderId !== currentRenderId){
-                return;
-            }
-
-            const page = await pdf.getPage(pageNumber);
-            const viewport = page.getViewport({scale:1});
-            const pageData = projectData?.pages?.[pageNumber - 1] || null;
-            const detectedColumns = pageData?.columns || [];
-
-            if(mobile && detectedColumns.length >= 2){
-                const targetWidth = Math.max(1,columnList.clientWidth);
-
-                for(const column of detectedColumns){
-                    const shell = await renderPdfRegion(
-                        page,
-                        pageData,
-                        column,
-                        targetWidth,
-                        "pdf-column-shell"
-                    );
-                    columnList.appendChild(shell);
-                }
-            }
-            else{
-                const region = {
-                    x:0,
-                    y:0,
-                    width:viewport.width,
-                    height:viewport.height
-                };
-                const shell = await renderPdfRegion(
-                    page,
-                    pageData,
-                    region,
-                    availableWidth,
-                    "pdf-page-shell"
-                );
-                viewer.appendChild(shell);
-            }
-        }
-
-        loading.classList.remove("loading-visible");
-        revealProject(viewer);
-        window.scrollTo({top:0,behavior:"smooth"});
-    }
-    catch(error){
-        if(renderId !== currentRenderId){
-            return;
-        }
-
-        loading.classList.remove("loading-visible");
-        viewer.innerHTML =
-        "<p style='padding:40px;text-align:center'>Unable to load PDF.</p>";
-        console.error(error);
-    }
-};
 
 window.loadSVG = async function(url){
 
@@ -1923,18 +1568,9 @@ function searchableLinks(){
         .map(link => ({
             label:link.textContent.trim(),
             link:link,
-            svgUrl:extractSvgUrl(link),
-            pdfUrl:extractPdfUrl(link)
+            svgUrl:extractSvgUrl(link)
         }))
         .filter(item => item.label);
-
-}
-
-function extractPdfUrl(link){
-
-    const handler = link.getAttribute("onclick") || "";
-    const match = handler.match(/loadPDF\(\s*(["'])(.*?)\1\s*\)/);
-    return match ? match[2] : null;
 
 }
 
@@ -1965,7 +1601,6 @@ function buildSearchIndex(){
 
     searchIndexPromise = Promise.all(items.map(async item => {
         let svgContent = "";
-        let pdfContent = "";
 
         if(item.svgUrl){
             try{
@@ -1987,15 +1622,10 @@ function buildSearchIndex(){
             }
         }
 
-        if(item.pdfUrl){
-            const pdfData = pdfProjectData(item.pdfUrl);
-            pdfContent = pdfData?.text || "";
-        }
-
         return {
             ...item,
             searchableText:normalizeSearchText(
-                item.label + " " + svgContent + " " + pdfContent
+                item.label + " " + svgContent
             )
         };
     }));
@@ -2116,7 +1746,7 @@ function(){
     <div class="svg-image-lightbox-content"></div>
 </div>
 
-<script>window.SVG_IMAGE_MANIFEST = {"pdf/01_Illustrations/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_home-page_2.svg": {"images": 2, "embedded": 2, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/01_Illustrations/03_nipote di prova/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_nipote di prova/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_nipote di prova/03_nipote di prova - Copia/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/04_Beyond-Human-Skin_href.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/05_martina prova 1/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/05_martina prova 1/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/03_Beyond_Human_Skin_merged.svg": {"images": 12, "embedded": 12, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/02_Commissioned/04_pippo da solo.svg": {"images": 12, "embedded": 12, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/02_Commissioned/05_Miao con i gattini/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/05_Miao con i gattini/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/03_Artist Statement/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/home.svg": {"images": 2, "embedded": 2, "external": 0, "has_text": false, "zoom_enabled": false}};window.PDF_PROJECT_MANIFEST = {"pdf/08_PDF test/1_BHS EXHIBITION pdf.pdf": {"text": "BEYOND HUMAN SKIN / \nCOABITAZIONI INVISIBILI \nSolo exhibition · EContemporary, Trieste · 2026\nCurated by Elena Cantori\nIn collaboration with Alpe Adria Cinema – Trieste \nFilm Festival\nBeyond Human Skin / Coabitazioni invisibili was presented as \na solo exhibition at EContemporary during the 2026 Trieste Film \nFestival.\nThe exhibition expanded the Beyond Human Skin project into a \nspatial installation, bringing together moving image, photography, \ndrawing, and animation, and inviting reflection on the body as \nembedded within a wider multispecies environment.\nphoto by Aural photography\nphoto by Aural photography\nphoto by Elisa Perucci", "pages": [{"page": 1, "width": 1920.0, "height": 1080.0, "columns": [{"x": 12.21, "y": 0.0, "width": 766.08, "height": 1080.0}, {"x": 836.547, "y": 0.0, "width": 489.464, "height": 1080.0}, {"x": 1420.918, "y": 0.0, "width": 486.122, "height": 1080.0}], "images": [{"bbox": [896.0, 84.0, 1264.543, 638.565], "label": "Enlarge image 1"}, {"bbox": [859.587, 735.043, 1300.956, 1028.36], "label": "Enlarge image 2"}, {"bbox": [1444.324, 394.82, 1884.0, 687.938], "label": "Enlarge image 3"}, {"bbox": [92.25, 631.734, 686.25, 1027.734], "label": "Enlarge image 4"}, {"bbox": [1444.324, 735.043, 1883.36, 1027.734], "label": "Enlarge image 5"}, {"bbox": [1443.958, 52.266, 1883.36, 345.201], "label": "Enlarge image 6"}], "links": [], "text": "BEYOND HUMAN SKIN / \nCOABITAZIONI INVISIBILI \nSolo exhibition · EContemporary, Trieste · 2026\nCurated by Elena Cantori\nIn collaboration with Alpe Adria Cinema – Trieste \nFilm Festival\nBeyond Human Skin / Coabitazioni invisibili was presented as \na solo exhibition at EContemporary during the 2026 Trieste Film \nFestival.\nThe exhibition expanded the Beyond Human Skin project into a \nspatial installation, bringing together moving image, photography, \ndrawing, and animation, and inviting reflection on the body as \nembedded within a wider multispecies environment.\nphoto by Aural photography\nphoto by Aural photography"}, {"page": 2, "width": 1920.0, "height": 1080.0, "columns": [{"x": 90.96, "y": 0.0, "width": 486.983, "height": 1080.0}, {"x": 681.96, "y": 0.0, "width": 538.08, "height": 1080.0}, {"x": 1344.96, "y": 0.0, "width": 486.569, "height": 1080.0}], "images": [{"bbox": [1368.0, 706.341, 1808.489, 1000.0], "label": "Enlarge image 1"}, {"bbox": [1369.009, 344.549, 1808.489, 637.536], "label": "Enlarge image 2"}, {"bbox": [114.0, 72.0, 554.489, 365.659], "label": "Enlarge image 3"}, {"bbox": [114.0, 441.971, 554.903, 735.907], "label": "Enlarge image 4"}, {"bbox": [705.0, 158.0, 1197.0, 922.0], "label": "Enlarge image 5"}], "links": [], "text": "photo by Elisa Perucci"}], "images": 11, "column_pages": 2}, "pdf/08_PDF test/2_project_BHS pdf.pdf": {"text": "BEYOND HUMAN SKIN\nBeyond Human Skin is an audiovisual project composed of \nmoving image, photography, and animation. The work emerged \nfrom a simple question: what remains of the human if we stop \nimagining it as autonomous, closed, and separated from the \nrest of the living world?\nThe project explores the body as a porous and multispecies \necosystem, continuously shaped through coexistence with \nmicroorganisms, environments, and other forms of life. Through \nmoving image, photography, illustration, and animation, the work \ninvestigates relationships between the visible and invisible, the \nhuman and the more-than-human. Illustration and animation \nbecome tools for imagining microscopic presences and \necological entanglements that escape direct human perception.\nThe project originates from a desire to question anthropocentric \nunderstandings of the body and rethink the human as part of \na multispecies ecology.\nBeyon Human Skin Video\nAudiovisual installation / moving image / \nphotography / animation. 2025\nPresented at EContemporary Gallery during the \nTrieste Film Festival 2026\nThe project is informed by Lynn Margulis’ concept \nof the *holobiont*, which understands the organism \ntogether with its associated microbial communities \nas a multispecies assemblage; Karen Barad’s notion \nof *intra-action*, through which entities emerge \nrelationally rather than existing independently \nof their relations; and Donna Haraway’s concept \nof *becoming-with*, which understands beings as \nconstituted through ongoing, situated relationships \nwith other species and forms of life. These \nideas, together with ecofeminist critiques of \nanthropocentrism and hierarchical divisions between \nhumans and the more-than-human world, shaped my \nunderstanding of the human body as relational, \nporous, and continuously co-constituted within a \nmultispecies world.\nThe project was developed through an \nintuitive and site-responsive process \nin Sicily, a territory with which I \nhave a deeply personal connection. \nRather than following a fixed script, \nthe work emerged through observation \nand intuitive filming.", "pages": [{"page": 1, "width": 1920.0, "height": 1080.0, "columns": [{"x": 135.96, "y": 0.0, "width": 717.701, "height": 1080.0}, {"x": 978.96, "y": 0.0, "width": 785.751, "height": 1080.0}], "images": [{"bbox": [1002.0, 88.92, 1741.671, 505.108], "label": "Enlarge image 1"}, {"bbox": [1002.0, 565.62, 1741.67, 991.08], "label": "Enlarge image 2"}], "links": [], "text": "BEYOND HUMAN SKIN\nBeyond Human Skin is an audiovisual project composed of \nmoving image, photography, and animation. The work emerged \nfrom a simple question: what remains of the human if we stop \nimagining it as autonomous, closed, and separated from the \nrest of the living world?\nThe project explores the body as a porous and multispecies \necosystem, continuously shaped through coexistence with \nmicroorganisms, environments, and other forms of life. Through \nmoving image, photography, illustration, and animation, the work \ninvestigates relationships between the visible and invisible, the \nhuman and the more-than-human. Illustration and animation \nbecome tools for imagining microscopic presences and \necological entanglements that escape direct human perception.\nThe project originates from a desire to question anthropocentric \nunderstandings of the body and rethink the human as part of \na multispecies ecology.\nBeyon Human Skin Video\nAudiovisual installation / moving image / \nphotography / animation. 2025\nPresented at EContemporary Gallery during the \nTrieste Film Festival 2026"}, {"page": 2, "width": 1920.0, "height": 1080.0, "columns": [{"x": 54.96, "y": 0.0, "width": 583.202, "height": 1080.0}, {"x": 641.042, "y": 0.0, "width": 654.51, "height": 1080.0}, {"x": 1299.452, "y": 0.0, "width": 565.119, "height": 1080.0}], "images": [{"bbox": [728.094, 783.029, 1191.906, 1044.0], "label": "Enlarge image 1"}, {"bbox": [1317.0, 395.362, 1832.271, 691.746], "label": "Enlarge image 2"}, {"bbox": [1317.0, 57.582, 1832.902, 354.33], "label": "Enlarge image 3"}, {"bbox": [1317.0, 727.37, 1841.531, 1022.418], "label": "Enlarge image 4"}, {"bbox": [728.094, 36.0, 1191.906, 297.28], "label": "Enlarge image 5"}, {"bbox": [78.0, 395.362, 619.561, 699.99], "label": "Enlarge image 6"}, {"bbox": [78.0, 57.582, 619.561, 362.209], "label": "Enlarge image 7"}], "links": [], "text": "The project is informed by Lynn Margulis’ concept \nof the *holobiont*, which understands the organism \ntogether with its associated microbial communities \nas a multispecies assemblage; Karen Barad’s notion \nof *intra-action*, through which entities emerge \nrelationally rather than existing independently \nof their relations; and Donna Haraway’s concept \nof *becoming-with*, which understands beings as \nconstituted through ongoing, situated relationships \nwith other species and forms of life. These \nideas, together with ecofeminist critiques of \nanthropocentrism and hierarchical divisions between \nhumans and the more-than-human world, shaped my \nunderstanding of the human body as relational, \nporous, and continuously co-constituted within a \nmultispecies world.\nThe project was developed through an \nintuitive and site-responsive process \nin Sicily, a territory with which I \nhave a deeply personal connection. \nRather than following a fixed script, \nthe work emerged through observation \nand intuitive filming."}], "images": 9, "column_pages": 2}, "pdf/08_PDF test/3_slime mold project pdf.pdf": {"text": "SLIME MOLD ORACLE PROJECT\nParticipatory experiment / living installation / \nspeculative ritual. 2025\nSlime Mold Oracle began as an experiment in communication and \ncollaboration with a more-than-human organism. Using a circular system of \nTarot cards connected through oats, the project followed the slime mold’s \ngrowth as it moved across the cards, generating symbolic associations \nand evolving narratives through its own behavior.\nWhat initially started as a personal reading gradually shifted into a collaborative \nand process-based practice, where the unfolding symbolic system no \nlonger appeared centered on me, the human participant, but potentially on \nthe slime mold itself.\nThe project investigates how collaboration \nwith more-than-human life might challenge \nanthropocentric ideas of authorship, \ncommunication, and control. What initially began \nas a personal interpretative exercise gradually \nshifted toward a process centered on the slime \nmold itself — its movements, rhythms, and ways \nof generating connections. This transformation \nraised questions around whose narrative was \nactually unfolding, and why the symbolic \njourney should necessarily belong to the human \nparticipant rather than to the organism itself.\nThe project draws from more-than-human \nand posthuman perspectives questioning \nhuman-centered ideas of intelligence, \ncommunication, and authorship. Tarot was \napproached not simply as a divinatory \ntool, but as a symbolic and non-linear \nlanguage capable of generating meaning \nthrough relationships, intuition, and \nassociation rather than fixed verbal \ncommunication.\nThe work was also informed by Alejandro \nJodorowsky’s understanding of Tarot \nas a dynamic relational system, where \nmeaning emerges through the connections \nbetween cards and through the process of \ninterpretation itself.", "pages": [{"page": 1, "width": 1920.0, "height": 1080.0, "columns": [{"x": 12.96, "y": 0.0, "width": 943.08, "height": 1080.0}, {"x": 980.671, "y": 0.0, "width": 927.543, "height": 1080.0}], "images": [{"bbox": [54.743, 536.0, 816.743, 1044.0], "label": "Enlarge image 1"}, {"bbox": [1003.711, 149.956, 1885.174, 923.126], "label": "Enlarge image 2"}], "links": [], "text": "SLIME MOLD ORACLE PROJECT\nParticipatory experiment / living installation / \nspeculative ritual. 2025\nSlime Mold Oracle began as an experiment in communication and \ncollaboration with a more-than-human organism. Using a circular system of \nTarot cards connected through oats, the project followed the slime mold’s \ngrowth as it moved across the cards, generating symbolic associations \nand evolving narratives through its own behavior.\nWhat initially started as a personal reading gradually shifted into a collaborative \nand process-based practice, where the unfolding symbolic system no \nlonger appeared centered on me, the human participant, but potentially on \nthe slime mold itself."}, {"page": 2, "width": 1920.0, "height": 1080.0, "columns": [{"x": 132.96, "y": 0.0, "width": 751.681, "height": 1080.0}, {"x": 1137.96, "y": 0.0, "width": 636.193, "height": 1080.0}], "images": [{"bbox": [1161.0, 55.626, 1736.698, 519.101], "label": "Enlarge image 1"}, {"bbox": [156.0, 570.737, 858.036, 936.706], "label": "Enlarge image 2"}], "links": [], "text": "The project investigates how collaboration \nwith more-than-human life might challenge \nanthropocentric ideas of authorship, \ncommunication, and control. What initially began \nas a personal interpretative exercise gradually \nshifted toward a process centered on the slime \nmold itself — its movements, rhythms, and ways \nof generating connections. This transformation \nraised questions around whose narrative was \nactually unfolding, and why the symbolic \njourney should necessarily belong to the human \nparticipant rather than to the organism itself.\nThe project draws from more-than-human \nand posthuman perspectives questioning \nhuman-centered ideas of intelligence, \ncommunication, and authorship. Tarot was \napproached not simply as a divinatory \ntool, but as a symbolic and non-linear \nlanguage capable of generating meaning \nthrough relationships, intuition, and \nassociation rather than fixed verbal \ncommunication.\nThe work was also informed by Alejandro \nJodorowsky’s understanding of Tarot \nas a dynamic relational system, where \nmeaning emerges through the connections \nbetween cards and through the process of \ninterpretation itself."}, {"page": 3, "width": 1920.0, "height": 1080.0, "columns": [], "images": [{"bbox": [36.0, 144.0, 1884.0, 465.335], "label": "Enlarge image 1"}], "links": [], "text": ""}], "images": 5, "column_pages": 2}, "pdf/project_BHS.pdf": {"text": "BEYOND HUMAN SKIN\nBeyond Human Skin is an audiovisual project composed of moving image, \nphotography, and animation. The work emerged from a simple question: \nwhat remains of the human if we stop imagining it as autonomous, closed, \nand separated from the rest of the living world?\nThe project explores the body as a porous and multispecies ecosystem, \ncontinuously shaped through coexistence with microorganisms, \nenvironments, and other forms of life. Through moving image, photography, \nillustration, and animation, the work investigates relationships between the \nvisible and invisible, the human and the more-than-human. Illustration \nand animation become tools for imagining microscopic presences and \necological entanglements that escape direct human perception.\nThe project originates from a desire to question anthropocentric \nunderstandings of the body and rethink the human as part of a multispecies \necology.\n[link to the video: https://vimeo.com/1195950941?fl=pl&fe=sh ]\nThe project is informed by Lynn Margulis’ concept of the \n*holobiont*, which understands the organism together with \nits associated microbial communities as a multispecies \nassemblage; Karen Barad’s notion of *intra-action*, through \nwhich entities emerge relationally rather than existing \nindependently of their relations; and Donna Haraway’s \nconcept of *becoming-with*, which understands beings as \nconstituted through ongoing, situated relationships with \nother species and forms of life. These ideas, together \nwith ecofeminist critiques of anthropocentrism and \nhierarchical divisions between humans and the more-than-\nhuman world, shaped my understanding of the human body as \nrelational, porous, and continuously co-constituted within \na multispecies world.\nThe project was developed through an intuitive and site-\nresponsive process in Sicily, a territory with which I have \na deeply personal connection. Rather than following a fixed \nscript, the work emerged through observation and intuitive \nfilming.\nAudiovisual installation / moving image / \nphotography / animation. 2025\nPresented at EContemporary Gallery during the \nTrieste Film Festival 2026", "pages": [{"page": 1, "width": 1920.0, "height": 1080.0, "columns": [{"x": 126.96, "y": 0.0, "width": 571.78, "height": 1080.0}, {"x": 703.697, "y": 0.0, "width": 513.343, "height": 1080.0}, {"x": 1264.96, "y": 0.0, "width": 478.077, "height": 1080.0}], "images": [{"bbox": [150.0, 680.46, 670.0, 973.047], "label": "Enlarge image 1"}, {"bbox": [726.771, 75.411, 1194.0, 344.162], "label": "Enlarge image 2"}, {"bbox": [726.0, 403.449, 1194.0, 672.643], "label": "Enlarge image 3"}, {"bbox": [1288.0, 343.875, 1715.476, 584.687], "label": "Enlarge image 4"}, {"bbox": [726.0, 743.264, 1194.0, 1012.458], "label": "Enlarge image 5"}, {"bbox": [1288.0, 764.885, 1715.476, 1005.411], "label": "Enlarge image 6"}], "links": [{"bbox": [282.112, 578.603, 607.376, 601.707], "url": "https://vimeo.com/1195950941?fl=pl&fe=sh", "label": "Open link https://vimeo.com/1195950941?fl=pl&fe=sh"}], "text": "BEYOND HUMAN SKIN\nBeyond Human Skin is an audiovisual project composed of moving image, \nphotography, and animation. The work emerged from a simple question: \nwhat remains of the human if we stop imagining it as autonomous, closed, \nand separated from the rest of the living world?\nThe project explores the body as a porous and multispecies ecosystem, \ncontinuously shaped through coexistence with microorganisms, \nenvironments, and other forms of life. Through moving image, photography, \nillustration, and animation, the work investigates relationships between the \nvisible and invisible, the human and the more-than-human. Illustration \nand animation become tools for imagining microscopic presences and \necological entanglements that escape direct human perception.\nThe project originates from a desire to question anthropocentric \nunderstandings of the body and rethink the human as part of a multispecies \necology.\n[link to the video: https://vimeo.com/1195950941?fl=pl&fe=sh ]\nThe project is informed by Lynn Margulis’ concept of the \n*holobiont*, which understands the organism together with \nits associated microbial communities as a multispecies \nassemblage; Karen Barad’s notion of *intra-action*, through \nwhich entities emerge relationally rather than existing \nindependently of their relations; and Donna Haraway’s \nconcept of *becoming-with*, which understands beings as \nconstituted through ongoing, situated relationships with \nother species and forms of life. These ideas, together \nwith ecofeminist critiques of anthropocentrism and \nhierarchical divisions between humans and the more-than-\nhuman world, shaped my understanding of the human body as \nrelational, porous, and continuously co-constituted within \na multispecies world.\nThe project was developed through an intuitive and site-\nresponsive process in Sicily, a territory with which I have \na deeply personal connection. Rather than following a fixed \nscript, the work emerged through observation and intuitive \nfilming.\nAudiovisual installation / moving image / \nphotography / animation. 2025\nPresented at EContemporary Gallery during the \nTrieste Film Festival 2026"}], "images": 6, "column_pages": 1}};</script>
+<script>window.SVG_IMAGE_MANIFEST = {"pdf/01_Illustrations/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_home-page_2.svg": {"images": 2, "embedded": 2, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/01_Illustrations/03_nipote di prova/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_nipote di prova/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_nipote di prova/03_nipote di prova - Copia/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/04_Beyond-Human-Skin_href.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/05_martina prova 1/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/05_martina prova 1/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/03_Beyond_Human_Skin_merged.svg": {"images": 12, "embedded": 12, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/02_Commissioned/04_pippo da solo.svg": {"images": 12, "embedded": 12, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/02_Commissioned/05_Miao con i gattini/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/05_Miao con i gattini/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/03_Artist Statement/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/08_PDF test/1_BHS EXHIBITION pdf.svg": {"images": 11, "embedded": 11, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/08_PDF test/2_project_BHS_2222 pdf.svg": {"images": 13, "embedded": 13, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/08_PDF test/3_slime mold project pdf.svg": {"images": 9, "embedded": 9, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/08_PDF test/BHS_EXHIBITION_embedded_fonts_test.svg": {"images": 11, "embedded": 11, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/home.svg": {"images": 2, "embedded": 2, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/project_BHS.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}};</script>
 
 <script>
 (function(){
