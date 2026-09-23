@@ -17,6 +17,7 @@ BASE_DIR = Path("pdf")
 TEMPLATE_FILE = Path("site_template.html")
 OUTPUT_FILE = Path("index.html")
 SUPPORTED_EXTENSIONS = {".html", ".htm", ".svg"}
+PDF_CONVERTER_VERSION = "2"
 SVG_NS = "http://www.w3.org/2000/svg"
 XLINK_NS = "http://www.w3.org/1999/xlink"
 ET.register_namespace("", SVG_NS)
@@ -449,6 +450,7 @@ SVG_ZOOM_JS = r"""
         }
 
         return (
+            image.getAttribute("data-lightbox-href") ||
             image.getAttribute("src") ||
             image.getAttribute("href") ||
             image.getAttributeNS("http://www.w3.org/1999/xlink","href") ||
@@ -486,7 +488,8 @@ SVG_ZOOM_JS = r"""
         }
 
         svg.dataset.zoomReady = "true";
-        const images = [...svg.querySelectorAll("image")];
+        const images = [...svg.querySelectorAll("image")]
+            .filter(image => !image.closest("mask,defs,clipPath,pattern"));
         const hasText = svgHasText(svg);
 
         /* A full-page SVG containing only an image does not need a lightbox. */
@@ -776,6 +779,30 @@ def local_tag_name(tag: str) -> str:
     """Return an XML tag name without its optional namespace."""
     return tag.rsplit("}", 1)[-1].lower()
 
+
+def svg_content_images(root: ET.Element):
+    """Return visible content images, excluding mask/definition resources."""
+    parents = {
+        child: parent
+        for parent in root.iter()
+        for child in parent
+    }
+    technical_ancestors = {"mask", "defs", "clippath", "pattern"}
+    result = []
+    for element in root.iter():
+        if local_tag_name(element.tag) != "image":
+            continue
+        ancestor = parents.get(element)
+        is_technical = False
+        while ancestor is not None:
+            if local_tag_name(ancestor.tag) in technical_ancestors:
+                is_technical = True
+                break
+            ancestor = parents.get(ancestor)
+        if not is_technical:
+            result.append(element)
+    return result
+
 def analyze_svg_images():
     """Scan every SVG recursively and describe its embedded image elements."""
     manifest = {}
@@ -791,10 +818,7 @@ def analyze_svg_images():
     for svg_path in svg_files:
         try:
             root = ET.parse(svg_path).getroot()
-            images = [
-                element for element in root.iter()
-                if local_tag_name(element.tag) == "image"
-            ]
+            images = svg_content_images(root)
             text_elements = [
                 element for element in root.iter()
                 if local_tag_name(element.tag) == "text"
@@ -1074,9 +1098,73 @@ def file_sha256(path: Path) -> str:
 def converted_svg_matches(svg_path: Path, pdf_hash: str) -> bool:
     try:
         _event, root = next(ET.iterparse(svg_path, events=("start",)))
-        return root.get("data-source-pdf-sha256") == pdf_hash
+        return (
+            root.get("data-source-pdf-sha256") == pdf_hash
+            and root.get("data-pdf-converter-version")
+            == PDF_CONVERTER_VERSION
+        )
     except (ET.ParseError, OSError, StopIteration):
         return False
+
+
+def add_pdf_lightbox_sources(
+    document: pymupdf.Document,
+    page: pymupdf.Page,
+    page_root: ET.Element,
+) -> tuple[int, int]:
+    """Attach flattened sources to masked images used by the lightbox."""
+    visible_images = svg_content_images(page_root)
+    pdf_images = list(page.get_images(full=True))
+    used_pdf_images = set()
+    composite_count = 0
+
+    for svg_image in visible_images:
+        try:
+            svg_width = round(float(svg_image.get("width", "0")))
+            svg_height = round(float(svg_image.get("height", "0")))
+        except ValueError:
+            continue
+
+        match_index = next((
+            index
+            for index, image in enumerate(pdf_images)
+            if index not in used_pdf_images
+            and int(image[2]) == svg_width
+            and int(image[3]) == svg_height
+        ), None)
+        if match_index is None:
+            continue
+
+        used_pdf_images.add(match_index)
+        xref, smask = int(pdf_images[match_index][0]), int(pdf_images[match_index][1])
+        if not smask:
+            continue
+
+        try:
+            mask = pymupdf.Pixmap(document, smask)
+            mask_samples = mask.samples
+            # Uniform opaque masks do not change the source image and would
+            # only duplicate several megabytes inside the generated SVG.
+            if not mask_samples or min(mask_samples) == max(mask_samples) == 255:
+                continue
+
+            base = pymupdf.Pixmap(document, xref)
+            composite = pymupdf.Pixmap(base, mask)
+            png_data = composite.tobytes("png")
+            svg_image.set(
+                "data-lightbox-href",
+                "data:image/png;base64,"
+                + base64.b64encode(png_data).decode("ascii"),
+            )
+            svg_image.set("data-lightbox-composite", "true")
+            composite_count += 1
+        except Exception as error:
+            print(
+                f"ATTENZIONE: immagine mascherata {xref} non composta: {error}",
+                file=sys.stderr,
+            )
+
+    return len(visible_images), composite_count
 
 
 def convert_pdf_to_svg(
@@ -1108,6 +1196,7 @@ def convert_pdf_to_svg(
             "viewBox": f"0 0 {output_width:g} {output_height:g}",
             "data-source-pdf": source.name,
             "data-source-pdf-sha256": source_hash or file_sha256(source),
+            "data-pdf-converter-version": PDF_CONVERTER_VERSION,
             "data-page-count": str(document.page_count),
         },
     )
@@ -1122,6 +1211,11 @@ def convert_pdf_to_svg(
     for page_number, page in enumerate(document, start=1):
         width, height = page_sizes[page_number - 1]
         page_root = ET.fromstring(page.get_svg_image(text_as_path=True))
+        page_image_count, _composite_count = add_pdf_lightbox_sources(
+            document,
+            page,
+            page_root,
+        )
         prefix_svg_references(page_root, f"p{page_number}_")
         group = ET.SubElement(
             outer,
@@ -1149,10 +1243,7 @@ def convert_pdf_to_svg(
         text_count += append_searchable_text_layer(
             group, page, page_number, embedded_fonts
         )
-        image_count += sum(
-            1 for element in page_root.iter()
-            if local_tag_name(element.tag) == "image"
-        )
+        image_count += page_image_count
         current_y += height + page_gap
 
     document.close()
