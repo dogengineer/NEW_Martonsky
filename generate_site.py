@@ -84,6 +84,10 @@ SVG_ZOOM_CSS = r"""
     transition:opacity .22s ease,visibility 0s;
 }
 
+#svgImageLightbox.magnifying{
+    cursor:zoom-in;
+}
+
 .svg-image-lightbox-content{
     display:flex;
     align-items:center;
@@ -108,11 +112,34 @@ SVG_ZOOM_CSS = r"""
     object-fit:contain;
 }
 
+.svg-image-magnifier{
+    position:fixed;
+    z-index:2;
+    display:block;
+    width:220px;
+    height:220px;
+    box-sizing:border-box;
+    border:2px solid #111;
+    background-color:#fff;
+    background-repeat:no-repeat;
+    box-shadow:0 12px 34px rgba(0,0,0,.24);
+    opacity:0;
+    visibility:hidden;
+    pointer-events:none;
+    transition:opacity .12s ease,visibility 0s linear .12s;
+}
+
+.svg-image-magnifier.visible{
+    opacity:1;
+    visibility:visible;
+    transition:opacity .12s ease,visibility 0s;
+}
+
 .svg-image-lightbox-close{
     position:absolute;
     top:18px;
     right:22px;
-    z-index:1;
+    z-index:3;
     border:0;
     padding:4px 8px;
     background:transparent;
@@ -138,11 +165,16 @@ SVG_ZOOM_CSS = r"""
         top:8px;
         right:10px;
     }
+
+    .svg-image-magnifier{
+        display:none !important;
+    }
 }
 
 @media(prefers-reduced-motion:reduce){
     #svgImageLightbox,
-    .svg-image-lightbox-content{
+    .svg-image-lightbox-content,
+    .svg-image-magnifier{
         transition:none;
     }
 }
@@ -152,6 +184,7 @@ SVG_ZOOM_HTML = r"""
 <div id="svgImageLightbox" role="dialog" aria-modal="true" aria-label="Enlarged image">
     <button class="svg-image-lightbox-close" type="button" aria-label="Close enlarged image">×</button>
     <div class="svg-image-lightbox-content"></div>
+    <div class="svg-image-magnifier" aria-hidden="true"></div>
 </div>
 """
 
@@ -164,6 +197,11 @@ SVG_ZOOM_JS = r"""
     const lightbox = document.getElementById("svgImageLightbox");
     const lightboxContent = lightbox.querySelector(".svg-image-lightbox-content");
     const closeButton = lightbox.querySelector(".svg-image-lightbox-close");
+    const magnifier = lightbox.querySelector(".svg-image-magnifier");
+    const magnifierMedia = window.matchMedia(
+        "(min-width:801px) and (hover:hover) and (pointer:fine)"
+    );
+    const magnifierZoom = 2.4;
     let previousOverflow = "";
 
     function pointInRoot(point,matrix){
@@ -689,6 +727,7 @@ SVG_ZOOM_JS = r"""
     }
 
     function closeLightbox(){
+        hideMagnifier();
         lightbox.classList.remove("open");
         document.body.style.overflow = previousOverflow;
         window.setTimeout(() => {
@@ -710,6 +749,81 @@ SVG_ZOOM_JS = r"""
             image.getAttributeNS("http://www.w3.org/1999/xlink","href") ||
             ""
         );
+    }
+
+    function hideMagnifier(){
+        magnifier.classList.remove("visible");
+        lightbox.classList.remove("magnifying");
+    }
+
+    function updateMagnifier(event){
+        if(
+            !magnifierMedia.matches ||
+            !lightbox.classList.contains("open") ||
+            event.target.closest?.(".svg-image-lightbox-close")
+        ){
+            hideMagnifier();
+            return;
+        }
+
+        const enlargedImage = lightboxContent.querySelector("img");
+
+        if(!enlargedImage || !enlargedImage.complete){
+            hideMagnifier();
+            return;
+        }
+
+        const imageRect = enlargedImage.getBoundingClientRect();
+        const insideImage =
+            event.clientX >= imageRect.left &&
+            event.clientX <= imageRect.right &&
+            event.clientY >= imageRect.top &&
+            event.clientY <= imageRect.bottom;
+
+        if(!insideImage || imageRect.width <= 0 || imageRect.height <= 0){
+            hideMagnifier();
+            return;
+        }
+
+        const viewportMargin = 8;
+        const maximumLensSide = Math.max(
+            220,
+            Math.min(window.innerWidth,window.innerHeight) - viewportMargin * 2
+        );
+        const lensSide = Math.min(
+            Math.max(220,imageRect.height * .8),
+            maximumLensSide
+        );
+        const lensWidth = lensSide;
+        const lensHeight = lensSide;
+
+        magnifier.style.width = lensSide + "px";
+        magnifier.style.height = lensSide + "px";
+        const left = Math.min(
+            Math.max(event.clientX - lensWidth / 2,viewportMargin),
+            window.innerWidth - lensWidth - viewportMargin
+        );
+        const top = Math.min(
+            Math.max(event.clientY - lensHeight / 2,viewportMargin),
+            window.innerHeight - lensHeight - viewportMargin
+        );
+        const imageX = event.clientX - imageRect.left;
+        const imageY = event.clientY - imageRect.top;
+        const cursorInLensX = event.clientX - left;
+        const cursorInLensY = event.clientY - top;
+        const source = enlargedImage.currentSrc || enlargedImage.src;
+
+        magnifier.style.left = left + "px";
+        magnifier.style.top = top + "px";
+        magnifier.style.backgroundImage = "url(" + JSON.stringify(source) + ")";
+        magnifier.style.backgroundSize =
+            imageRect.width * magnifierZoom + "px " +
+            imageRect.height * magnifierZoom + "px";
+        magnifier.style.backgroundPosition =
+            cursorInLensX - imageX * magnifierZoom + "px " +
+            (cursorInLensY - imageY * magnifierZoom) + "px";
+        lightbox.classList.add("magnifying");
+        magnifier.classList.add("visible");
     }
 
     function openLightbox(image){
@@ -845,6 +959,8 @@ SVG_ZOOM_JS = r"""
     observer.observe(viewer,{childList:true,subtree:false});
 
     closeButton.addEventListener("click",closeLightbox);
+    lightbox.addEventListener("mousemove",updateMagnifier);
+    lightbox.addEventListener("mouseleave",hideMagnifier);
     lightbox.addEventListener("click",event => {
         if(event.target === lightbox){
             closeLightbox();
