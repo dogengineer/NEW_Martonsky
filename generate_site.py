@@ -1584,13 +1584,23 @@ def get_order(name: str) -> int:
 def is_supported_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
 
+def is_generated_asset_directory(path: Path) -> bool:
+    """Asset folders support SVGs but must never become menu entries."""
+    return path.is_dir() and (
+        path.name.endswith("_assets") or
+        path.name.endswith("_assets.tmp")
+    )
+
 def get_folder_items(folder: Path):
     if not folder.is_dir():
         return []
 
     items = [
         item for item in folder.iterdir()
-        if item.is_dir() or is_supported_file(item)
+        if (
+            (item.is_dir() and not is_generated_asset_directory(item)) or
+            is_supported_file(item)
+        )
     ]
 
     items.sort(
@@ -1685,7 +1695,7 @@ def render_navigation() -> str:
 
     top_folders = [
         folder for folder in BASE_DIR.iterdir()
-        if folder.is_dir()
+        if folder.is_dir() and not is_generated_asset_directory(folder)
     ]
 
     top_folders.sort(
