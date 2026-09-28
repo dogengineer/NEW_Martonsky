@@ -118,6 +118,39 @@ SVG_ZOOM_CSS = r"""
     max-width:94vw;
     max-height:92vh;
     object-fit:contain;
+    transform:translate3d(0,0,0) scale(1);
+    transform-origin:center center;
+    transition:transform .22s cubic-bezier(.2,.75,.2,1);
+    will-change:transform;
+}
+
+#svgImageLightbox.touch-zooming .svg-image-lightbox-content img{
+    transition:none;
+}
+
+.svg-mobile-zoom-hint{
+    position:absolute;
+    left:50%;
+    bottom:24px;
+    z-index:3;
+    padding:8px 12px;
+    border-radius:2px;
+    background:rgba(17,17,17,.78);
+    color:#fff;
+    font:400 12px/1.2 Georgia,serif;
+    letter-spacing:.02em;
+    opacity:0;
+    visibility:hidden;
+    pointer-events:none;
+    transform:translate(-50%,8px);
+    transition:opacity .2s ease,transform .2s ease,visibility 0s linear .2s;
+}
+
+.svg-mobile-zoom-hint.visible{
+    opacity:1;
+    visibility:visible;
+    transform:translate(-50%,0);
+    transition:opacity .2s ease,transform .2s ease,visibility 0s;
 }
 
 .svg-image-magnifier{
@@ -169,6 +202,18 @@ SVG_ZOOM_CSS = r"""
         padding:20px 12px;
     }
 
+    .svg-image-lightbox-content{
+        pointer-events:auto;
+    }
+
+    .svg-image-lightbox-content img{
+        max-width:96vw;
+        max-height:90vh;
+        touch-action:none;
+        user-select:none;
+        -webkit-user-drag:none;
+    }
+
     .svg-image-lightbox-close{
         top:8px;
         right:10px;
@@ -177,12 +222,18 @@ SVG_ZOOM_CSS = r"""
     .svg-image-magnifier{
         display:none !important;
     }
+
+    .svg-mobile-zoom-hint{
+        bottom:18px;
+    }
 }
 
 @media(prefers-reduced-motion:reduce){
     #svgImageLightbox,
     .svg-image-lightbox-content,
-    .svg-image-magnifier{
+    .svg-image-magnifier,
+    .svg-image-lightbox-content img,
+    .svg-mobile-zoom-hint{
         transition:none;
     }
 }
@@ -192,6 +243,7 @@ SVG_ZOOM_HTML = r"""
 <div id="svgImageLightbox" role="dialog" aria-modal="true" aria-label="Enlarged image">
     <button class="svg-image-lightbox-close" type="button" aria-label="Close enlarged image">×</button>
     <div class="svg-image-lightbox-content"></div>
+    <div class="svg-mobile-zoom-hint" aria-hidden="true">Pizzica per ingrandire</div>
     <div class="svg-image-magnifier" aria-hidden="true"></div>
 </div>
 """
@@ -206,11 +258,28 @@ SVG_ZOOM_JS = r"""
     const lightboxContent = lightbox.querySelector(".svg-image-lightbox-content");
     const closeButton = lightbox.querySelector(".svg-image-lightbox-close");
     const magnifier = lightbox.querySelector(".svg-image-magnifier");
+    const mobileZoomHint = lightbox.querySelector(".svg-mobile-zoom-hint");
     const magnifierMedia = window.matchMedia(
         "(min-width:801px) and (hover:hover) and (pointer:fine)"
     );
+    const touchZoomMedia = window.matchMedia(
+        "(max-width:800px), (hover:none), (pointer:coarse)"
+    );
     const magnifierZoom = 2.4;
+    const maximumTouchZoom = 4;
+    const doubleTapZoom = 2.5;
     let previousOverflow = "";
+    let activeLightboxImage = null;
+    let touchScale = 1;
+    let touchTranslateX = 0;
+    let touchTranslateY = 0;
+    let pinchStart = null;
+    let touchGestureMoved = false;
+    let touchGestureWasMulti = false;
+    let lastTapTime = 0;
+    let mobileHintShown = false;
+    let mobileHintTimer = 0;
+    const touchPointers = new Map();
 
     function pointInRoot(point,matrix){
         return new DOMPoint(point.x,point.y).matrixTransform(matrix);
@@ -734,13 +803,243 @@ SVG_ZOOM_JS = r"""
         return clones;
     }
 
+    function clamp(value,minimum,maximum){
+        return Math.min(Math.max(value,minimum),maximum);
+    }
+
+    function touchPointDistance(first,second){
+        return Math.hypot(
+            second.x - first.x,
+            second.y - first.y
+        );
+    }
+
+    function touchPointMiddle(first,second){
+        return {
+            x:(first.x + second.x) / 2,
+            y:(first.y + second.y) / 2
+        };
+    }
+
+    function constrainTouchTranslation(){
+        if(!activeLightboxImage || touchScale <= 1){
+            touchTranslateX = 0;
+            touchTranslateY = 0;
+            return;
+        }
+
+        const horizontalMargin = 20;
+        const verticalMargin = 20;
+        const maximumX = Math.max(
+            0,
+            (activeLightboxImage.clientWidth * touchScale -
+                window.innerWidth + horizontalMargin * 2) / 2
+        );
+        const maximumY = Math.max(
+            0,
+            (activeLightboxImage.clientHeight * touchScale -
+                window.innerHeight + verticalMargin * 2) / 2
+        );
+
+        touchTranslateX = clamp(touchTranslateX,-maximumX,maximumX);
+        touchTranslateY = clamp(touchTranslateY,-maximumY,maximumY);
+    }
+
+    function applyTouchTransform(animated = false){
+        if(!activeLightboxImage){
+            return;
+        }
+
+        constrainTouchTranslation();
+        lightbox.classList.toggle("touch-zooming",!animated);
+        activeLightboxImage.style.transform =
+            "translate3d(" + touchTranslateX + "px," +
+            touchTranslateY + "px,0) scale(" + touchScale + ")";
+    }
+
+    function resetTouchZoom(){
+        touchPointers.clear();
+        pinchStart = null;
+        touchScale = 1;
+        touchTranslateX = 0;
+        touchTranslateY = 0;
+        touchGestureMoved = false;
+        touchGestureWasMulti = false;
+        lastTapTime = 0;
+        lightbox.classList.remove("touch-zooming");
+
+        if(activeLightboxImage){
+            activeLightboxImage.style.transform =
+                "translate3d(0,0,0) scale(1)";
+        }
+    }
+
+    function hideMobileZoomHint(){
+        window.clearTimeout(mobileHintTimer);
+        mobileZoomHint.classList.remove("visible");
+    }
+
+    function showMobileZoomHint(){
+        if(!touchZoomMedia.matches || mobileHintShown){
+            return;
+        }
+
+        mobileHintShown = true;
+        mobileZoomHint.classList.add("visible");
+        mobileHintTimer = window.setTimeout(hideMobileZoomHint,1800);
+    }
+
+    function toggleTouchZoom(clientX,clientY){
+        if(!activeLightboxImage || !touchZoomMedia.matches){
+            return;
+        }
+
+        if(touchScale > 1.05){
+            touchScale = 1;
+            touchTranslateX = 0;
+            touchTranslateY = 0;
+        }
+        else{
+            touchScale = doubleTapZoom;
+            touchTranslateX =
+                (window.innerWidth / 2 - clientX) * (touchScale - 1);
+            touchTranslateY =
+                (window.innerHeight / 2 - clientY) * (touchScale - 1);
+        }
+
+        applyTouchTransform(true);
+    }
+
+    function beginTouchZoom(event){
+        if(
+            !touchZoomMedia.matches ||
+            !activeLightboxImage ||
+            event.target !== activeLightboxImage ||
+            event.pointerType === "mouse"
+        ){
+            return;
+        }
+
+        event.preventDefault();
+        hideMobileZoomHint();
+        activeLightboxImage.setPointerCapture?.(event.pointerId);
+        touchPointers.set(event.pointerId,{
+            x:event.clientX,
+            y:event.clientY
+        });
+        touchGestureMoved = false;
+        lightbox.classList.add("touch-zooming");
+
+        if(touchPointers.size === 2){
+            touchGestureWasMulti = true;
+            const [first,second] = [...touchPointers.values()];
+            pinchStart = {
+                distance:Math.max(touchPointDistance(first,second),1),
+                middle:touchPointMiddle(first,second),
+                scale:touchScale,
+                translateX:touchTranslateX,
+                translateY:touchTranslateY
+            };
+        }
+    }
+
+    function moveTouchZoom(event){
+        const previousPoint = touchPointers.get(event.pointerId);
+        if(!previousPoint || !activeLightboxImage){
+            return;
+        }
+
+        event.preventDefault();
+        const currentPoint = {x:event.clientX,y:event.clientY};
+        touchPointers.set(event.pointerId,currentPoint);
+
+        if(touchPointers.size >= 2 && pinchStart){
+            const [first,second] = [...touchPointers.values()];
+            const currentMiddle = touchPointMiddle(first,second);
+            const distance = Math.max(touchPointDistance(first,second),1);
+            const nextScale = clamp(
+                pinchStart.scale * distance / pinchStart.distance,
+                1,
+                maximumTouchZoom
+            );
+            const scaleRatio = nextScale / pinchStart.scale;
+            const viewportCenterX = window.innerWidth / 2;
+            const viewportCenterY = window.innerHeight / 2;
+
+            touchScale = nextScale;
+            touchTranslateX = currentMiddle.x - viewportCenterX -
+                scaleRatio * (
+                    pinchStart.middle.x - viewportCenterX -
+                    pinchStart.translateX
+                );
+            touchTranslateY = currentMiddle.y - viewportCenterY -
+                scaleRatio * (
+                    pinchStart.middle.y - viewportCenterY -
+                    pinchStart.translateY
+                );
+            touchGestureMoved = true;
+            applyTouchTransform();
+            return;
+        }
+
+        if(touchPointers.size === 1 && touchScale > 1){
+            const deltaX = currentPoint.x - previousPoint.x;
+            const deltaY = currentPoint.y - previousPoint.y;
+            touchTranslateX += deltaX;
+            touchTranslateY += deltaY;
+            touchGestureMoved = touchGestureMoved ||
+                Math.abs(deltaX) + Math.abs(deltaY) > 2;
+            applyTouchTransform();
+        }
+    }
+
+    function endTouchZoom(event){
+        if(!touchPointers.has(event.pointerId)){
+            return;
+        }
+
+        event.preventDefault();
+        const mayBeTap =
+            touchPointers.size === 1 &&
+            !touchGestureMoved &&
+            !touchGestureWasMulti;
+        touchPointers.delete(event.pointerId);
+
+        if(touchPointers.size < 2){
+            pinchStart = null;
+        }
+
+        if(touchPointers.size === 0){
+            lightbox.classList.remove("touch-zooming");
+            constrainTouchTranslation();
+            applyTouchTransform(true);
+
+            if(mayBeTap){
+                const now = performance.now();
+                if(now - lastTapTime < 320){
+                    toggleTouchZoom(event.clientX,event.clientY);
+                    lastTapTime = 0;
+                }
+                else{
+                    lastTapTime = now;
+                }
+            }
+
+            touchGestureWasMulti = false;
+            touchGestureMoved = false;
+        }
+    }
+
     function closeLightbox(){
         hideMagnifier();
+        hideMobileZoomHint();
+        resetTouchZoom();
         lightbox.classList.remove("open");
         document.body.style.overflow = previousOverflow;
         window.setTimeout(() => {
             if(!lightbox.classList.contains("open")){
                 lightboxContent.replaceChildren();
+                activeLightboxImage = null;
             }
         },230);
     }
@@ -850,9 +1149,12 @@ SVG_ZOOM_JS = r"""
         enlargedImage.decoding = "async";
 
         lightboxContent.replaceChildren(enlargedImage);
+        activeLightboxImage = enlargedImage;
+        resetTouchZoom();
         previousOverflow = document.body.style.overflow;
         document.body.style.overflow = "hidden";
         lightbox.classList.add("open");
+        showMobileZoomHint();
         closeButton.focus({preventScroll:true});
     }
 
@@ -1087,6 +1389,13 @@ SVG_ZOOM_JS = r"""
     observer.observe(viewer,{childList:true,subtree:false});
 
     closeButton.addEventListener("click",closeLightbox);
+    lightboxContent.addEventListener("pointerdown",beginTouchZoom);
+    lightboxContent.addEventListener("pointermove",moveTouchZoom);
+    lightboxContent.addEventListener("pointerup",endTouchZoom);
+    lightboxContent.addEventListener("pointercancel",event => {
+        touchGestureMoved = true;
+        endTouchZoom(event);
+    });
     lightbox.addEventListener("mousemove",updateMagnifier);
     lightbox.addEventListener("mouseleave",hideMagnifier);
     lightbox.addEventListener("click",event => {
@@ -1097,6 +1406,11 @@ SVG_ZOOM_JS = r"""
     document.addEventListener("keydown",event => {
         if(event.key === "Escape" && lightbox.classList.contains("open")){
             closeLightbox();
+        }
+    });
+    window.addEventListener("resize",() => {
+        if(lightbox.classList.contains("open") && touchScale > 1){
+            applyTouchTransform(true);
         }
     });
 })();
