@@ -1164,9 +1164,13 @@ footer a:hover{
 </ul></li>
 <li class="top-menu-item"><span class="menu-label">PDF test</span><ul class="submenu">
 <li><a href="#" onclick="loadSVG(&quot;pdf/08_PDF test/1_BHS EXHIBITION pdf.svg&quot;);return false;">BHS EXHIBITION pdf</a></li>
+<li><span class="empty-item">BHS EXHIBITION pdf_assets</span></li>
 <li><a href="#" onclick="loadSVG(&quot;pdf/08_PDF test/2_project_BHS_2222 pdf.svg&quot;);return false;">project_BHS_2222 pdf</a></li>
+<li><span class="empty-item">project_BHS_2222 pdf_assets</span></li>
 <li><a href="#" onclick="loadSVG(&quot;pdf/08_PDF test/3_slime mold project pdf.svg&quot;);return false;">slime mold project pdf</a></li>
+<li><span class="empty-item">slime mold project pdf_assets</span></li>
 </ul></li>
+<li><span class="menu-label empty-section">project_BHS_assets</span></li>
 <li><a href="#" onclick="loadContact();return false;">CONTACT</a></li>
 </ul>
 </nav>
@@ -1342,17 +1346,76 @@ window.loadSVG = async function(url){
             return;
         }
 
-        svgViewer.innerHTML =
-            svgText;
+        const isMobile =
+            window.matchMedia("(max-width:800px)").matches;
+        const parsedDocument = new DOMParser().parseFromString(
+            svgText,
+            "image/svg+xml"
+        );
+        const parsedSvg = parsedDocument.documentElement;
 
-        const svg =
-            svgViewer.querySelector("svg");
-
-        if(!svg){
+        if(
+            !parsedSvg ||
+            parsedSvg.localName !== "svg" ||
+            parsedDocument.querySelector("parsererror")
+        ){
             throw new Error(
                 "Il file caricato non contiene un elemento <svg> valido."
             );
         }
+
+        const svg = document.importNode(parsedSvg,true);
+        const svgSourceUrl = new URL(url,window.location.href);
+        const transparentPixel =
+            "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+
+        svg.querySelectorAll("image").forEach(image => {
+            const href =
+                image.getAttribute("href") ||
+                image.getAttributeNS(
+                    "http://www.w3.org/1999/xlink",
+                    "href"
+                ) || "";
+            const lightboxHref =
+                image.getAttribute("data-lightbox-href") || "";
+
+            if(href && !href.startsWith("data:") && !href.startsWith("#")){
+                const resolvedHref = new URL(href,svgSourceUrl).href;
+                if(
+                    isMobile &&
+                    image.getAttribute("data-preview-asset") === "true"
+                ){
+                    image.setAttribute("data-deferred-href",resolvedHref);
+                    image.setAttribute("href",transparentPixel);
+                    image.setAttributeNS(
+                        "http://www.w3.org/1999/xlink",
+                        "xlink:href",
+                        transparentPixel
+                    );
+                }
+                else{
+                    image.setAttribute("href",resolvedHref);
+                    image.setAttributeNS(
+                        "http://www.w3.org/1999/xlink",
+                        "xlink:href",
+                        resolvedHref
+                    );
+                }
+            }
+
+            if(
+                lightboxHref &&
+                !lightboxHref.startsWith("data:") &&
+                !lightboxHref.startsWith("#")
+            ){
+                image.setAttribute(
+                    "data-lightbox-href",
+                    new URL(lightboxHref,svgSourceUrl).href
+                );
+            }
+        });
+
+        svgViewer.replaceChildren(svg);
 
         if(!svg.hasAttribute("viewBox")){
 
@@ -1387,9 +1450,6 @@ window.loadSVG = async function(url){
 
         const initialViewerWidth =
             svgViewer.clientWidth;
-
-        const isMobile =
-            window.matchMedia("(max-width:800px)").matches;
 
         const hasReadableText =
             [...svg.querySelectorAll("text")]
@@ -1867,7 +1927,7 @@ function(){
     <div class="svg-image-magnifier" aria-hidden="true"></div>
 </div>
 
-<script>window.SVG_IMAGE_MANIFEST = {"pdf/01_Illustrations/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_home-page_2.svg": {"images": 1, "embedded": 1, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/01_Illustrations/03_nipote di prova/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_nipote di prova/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_nipote di prova/03_nipote di prova - Copia/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/04_Beyond-Human-Skin_href.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/05_martina prova 1/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/05_martina prova 1/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/03_Beyond_Human_Skin_merged.svg": {"images": 0, "embedded": 0, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/02_Commissioned/04_pippo da solo.svg": {"images": 0, "embedded": 0, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/02_Commissioned/05_Miao con i gattini/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/05_Miao con i gattini/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/03_Artist Statement/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/08_PDF test/1_BHS EXHIBITION pdf.svg": {"images": 11, "embedded": 11, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/08_PDF test/2_project_BHS_2222 pdf.svg": {"images": 9, "embedded": 9, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/08_PDF test/3_slime mold project pdf.svg": {"images": 5, "embedded": 5, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/home.svg": {"images": 1, "embedded": 1, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/project_BHS.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}};</script>
+<script>window.SVG_IMAGE_MANIFEST = {"pdf/01_Illustrations/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_home-page_2.svg": {"images": 1, "embedded": 1, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/01_Illustrations/03_nipote di prova/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_nipote di prova/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/03_nipote di prova/03_nipote di prova - Copia/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/04_Beyond-Human-Skin_href.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/05_martina prova 1/01_Beyond-Human-Skin.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/01_Illustrations/05_martina prova 1/02_Project-Two.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/03_Beyond_Human_Skin_merged.svg": {"images": 0, "embedded": 0, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/02_Commissioned/04_pippo da solo.svg": {"images": 0, "embedded": 0, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/02_Commissioned/05_Miao con i gattini/01_Cani Grassi.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/02_Commissioned/05_Miao con i gattini/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/03_Artist Statement/02_Topo di plastica.svg": {"images": 6, "embedded": 6, "external": 0, "has_text": true, "zoom_enabled": true}, "pdf/08_PDF test/1_BHS EXHIBITION pdf.svg": {"images": 11, "embedded": 0, "external": 11, "has_text": true, "zoom_enabled": true}, "pdf/08_PDF test/2_project_BHS_2222 pdf.svg": {"images": 9, "embedded": 0, "external": 9, "has_text": true, "zoom_enabled": true}, "pdf/08_PDF test/3_slime mold project pdf.svg": {"images": 5, "embedded": 0, "external": 5, "has_text": true, "zoom_enabled": true}, "pdf/home.svg": {"images": 1, "embedded": 1, "external": 0, "has_text": false, "zoom_enabled": false}, "pdf/project_BHS.svg": {"images": 6, "embedded": 0, "external": 6, "has_text": true, "zoom_enabled": true}};</script>
 
 <script>
 (function(){
@@ -2238,10 +2298,35 @@ function(){
     }
 
     function detectMobileColumns(svg){
-        if(
-            !window.matchMedia("(max-width:800px)").matches ||
-            !svgHasText(svg)
-        ){
+        if(!window.matchMedia("(max-width:800px)").matches){
+            return null;
+        }
+
+        const preparedLayout = svg.getAttribute("data-mobile-layout");
+        if(preparedLayout){
+            try{
+                const columns = JSON.parse(preparedLayout);
+                if(
+                    Array.isArray(columns) &&
+                    columns.length &&
+                    columns.every(column =>
+                        Number.isFinite(column.x) &&
+                        Number.isFinite(column.y) &&
+                        Number.isFinite(column.width) &&
+                        Number.isFinite(column.height) &&
+                        column.width > 0 &&
+                        column.height > 0
+                    )
+                ){
+                    return columns;
+                }
+            }
+            catch(error){
+                console.warn("Invalid prepared mobile SVG layout",error);
+            }
+        }
+
+        if(!svgHasText(svg)){
             return null;
         }
 
@@ -2382,10 +2467,102 @@ function(){
         });
     }
 
+    function visibleSvgImages(container){
+        return [...container.querySelectorAll("image")]
+            .filter(image => !image.closest("mask,defs,clipPath,pattern"));
+    }
+
+    function activateDeferredImages(container){
+        const images = [
+            ...container.querySelectorAll("image[data-deferred-href]")
+        ];
+        const sources = [...new Set(
+            images.map(image => image.getAttribute("data-deferred-href"))
+                .filter(Boolean)
+        )];
+
+        images.forEach(image => {
+            const source = image.getAttribute("data-deferred-href");
+            if(!source){
+                return;
+            }
+            image.setAttribute("href",source);
+            image.setAttributeNS(
+                "http://www.w3.org/1999/xlink",
+                "xlink:href",
+                source
+            );
+            image.removeAttribute("data-deferred-href");
+        });
+
+        if(sources.length === 0){
+            return Promise.resolve();
+        }
+
+        return Promise.race([
+            Promise.all(sources.map(source => new Promise(resolve => {
+                const preload = new Image();
+                preload.onload = resolve;
+                preload.onerror = resolve;
+                preload.src = source;
+            }))),
+            new Promise(resolve => window.setTimeout(resolve,8000))
+        ]);
+    }
+
+    let deferredColumnObserver = null;
+
+    function observeDeferredColumn(frame){
+        if(!frame.querySelector("image[data-deferred-href]")){
+            return;
+        }
+
+        if(!("IntersectionObserver" in window)){
+            activateDeferredImages(frame);
+            return;
+        }
+
+        if(!deferredColumnObserver){
+            deferredColumnObserver = new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    if(entry.isIntersecting){
+                        activateDeferredImages(entry.target);
+                        deferredColumnObserver.unobserve(entry.target);
+                    }
+                });
+            },{
+                rootMargin:"700px 0px",
+                threshold:0
+            });
+        }
+        deferredColumnObserver.observe(frame);
+    }
+
+    function boundsIntersectColumn(bounds,column){
+        return Boolean(
+            bounds &&
+            bounds.x < column.x + column.width &&
+            bounds.x + bounds.width > column.x &&
+            bounds.y < column.y + column.height &&
+            bounds.y + bounds.height > column.y
+        );
+    }
+
     function createMobileColumns(svg,columns){
         const wrapper = document.createElement("div");
         wrapper.className = "mobile-svg-columns";
         wrapper.dataset.columnLayoutDetected = "true";
+
+        const sourceImageBounds = new Map();
+        visibleSvgImages(svg).forEach((image,index) => {
+            image.setAttribute("data-mobile-image-index",String(index));
+            try{
+                sourceImageBounds.set(index,elementBoundsInRoot(image,svg));
+            }
+            catch(error){
+                sourceImageBounds.set(index,null);
+            }
+        });
 
         const clones = columns.map((column,index) => {
             const frame = document.createElement("div");
@@ -2397,6 +2574,20 @@ function(){
             clone.removeAttribute("style");
             clone.removeAttribute("data-zoom-ready");
             clone.querySelectorAll(".svg-zoom-hotspot").forEach(node => node.remove());
+            visibleSvgImages(clone).forEach(image => {
+                const imageIndex = Number(
+                    image.getAttribute("data-mobile-image-index")
+                );
+                if(
+                    Number.isFinite(imageIndex) &&
+                    !boundsIntersectColumn(
+                        sourceImageBounds.get(imageIndex),
+                        column
+                    )
+                ){
+                    image.remove();
+                }
+            });
             makeIdsUnique(
                 clone,
                 "mobile-row-" + column.rowIndex +
@@ -2414,12 +2605,20 @@ function(){
             );
             frame.appendChild(clone);
             wrapper.appendChild(frame);
+            if(index > 0){
+                observeDeferredColumn(frame);
+            }
             return clone;
         });
 
         viewer.classList.remove("mobile-svg-scroll");
         viewer.scrollLeft = 0;
         svg.replaceWith(wrapper);
+        /* Observe after insertion: some browsers do not dispatch
+           IntersectionObserver callbacks for detached elements. */
+        [...wrapper.querySelectorAll(".mobile-svg-column-frame")]
+            .slice(1)
+            .forEach(observeDeferredColumn);
         return clones;
     }
 
@@ -2949,6 +3148,9 @@ function(){
                     ":scope > .mobile-svg-column-frame > svg"
                 )
             ];
+            if(columnSvgs[0]){
+                await activateDeferredImages(columnSvgs[0]);
+            }
             await nextFrame();
             columnSvgs.forEach(prepareSvg);
             await nextFrame();
@@ -2965,10 +3167,14 @@ function(){
 
         if(columns){
             const columnSvgs = createMobileColumns(svg,columns);
+            if(columnSvgs[0]){
+                await activateDeferredImages(columnSvgs[0]);
+            }
             await nextFrame();
             columnSvgs.forEach(prepareSvg);
         }
         else{
+            await activateDeferredImages(svg);
             prepareSvg(svg);
         }
 

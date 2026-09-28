@@ -1090,17 +1090,76 @@ window.loadSVG = async function(url){
             return;
         }
 
-        svgViewer.innerHTML =
-            svgText;
+        const isMobile =
+            window.matchMedia("(max-width:800px)").matches;
+        const parsedDocument = new DOMParser().parseFromString(
+            svgText,
+            "image/svg+xml"
+        );
+        const parsedSvg = parsedDocument.documentElement;
 
-        const svg =
-            svgViewer.querySelector("svg");
-
-        if(!svg){
+        if(
+            !parsedSvg ||
+            parsedSvg.localName !== "svg" ||
+            parsedDocument.querySelector("parsererror")
+        ){
             throw new Error(
                 "Il file caricato non contiene un elemento <svg> valido."
             );
         }
+
+        const svg = document.importNode(parsedSvg,true);
+        const svgSourceUrl = new URL(url,window.location.href);
+        const transparentPixel =
+            "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+
+        svg.querySelectorAll("image").forEach(image => {
+            const href =
+                image.getAttribute("href") ||
+                image.getAttributeNS(
+                    "http://www.w3.org/1999/xlink",
+                    "href"
+                ) || "";
+            const lightboxHref =
+                image.getAttribute("data-lightbox-href") || "";
+
+            if(href && !href.startsWith("data:") && !href.startsWith("#")){
+                const resolvedHref = new URL(href,svgSourceUrl).href;
+                if(
+                    isMobile &&
+                    image.getAttribute("data-preview-asset") === "true"
+                ){
+                    image.setAttribute("data-deferred-href",resolvedHref);
+                    image.setAttribute("href",transparentPixel);
+                    image.setAttributeNS(
+                        "http://www.w3.org/1999/xlink",
+                        "xlink:href",
+                        transparentPixel
+                    );
+                }
+                else{
+                    image.setAttribute("href",resolvedHref);
+                    image.setAttributeNS(
+                        "http://www.w3.org/1999/xlink",
+                        "xlink:href",
+                        resolvedHref
+                    );
+                }
+            }
+
+            if(
+                lightboxHref &&
+                !lightboxHref.startsWith("data:") &&
+                !lightboxHref.startsWith("#")
+            ){
+                image.setAttribute(
+                    "data-lightbox-href",
+                    new URL(lightboxHref,svgSourceUrl).href
+                );
+            }
+        });
+
+        svgViewer.replaceChildren(svg);
 
         if(!svg.hasAttribute("viewBox")){
 
@@ -1135,9 +1194,6 @@ window.loadSVG = async function(url){
 
         const initialViewerWidth =
             svgViewer.clientWidth;
-
-        const isMobile =
-            window.matchMedia("(max-width:800px)").matches;
 
         const hasReadableText =
             [...svg.querySelectorAll("text")]

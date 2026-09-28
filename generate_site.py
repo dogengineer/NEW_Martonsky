@@ -1,14 +1,19 @@
 from pathlib import Path
 import base64
+import binascii
 import hashlib
 import html
 import re
 import json
+import shutil
+import statistics
 import sys
 import xml.etree.ElementTree as ET
 from io import BytesIO
+from urllib.parse import quote, unquote_to_bytes
 
 import pymupdf
+from PIL import Image
 from fontTools.agl import AGL2UV
 from fontTools.cffLib import CFFFontSet
 from fontTools.fontBuilder import FontBuilder
@@ -17,7 +22,9 @@ BASE_DIR = Path("pdf")
 TEMPLATE_FILE = Path("site_template.html")
 OUTPUT_FILE = Path("index.html")
 SUPPORTED_EXTENSIONS = {".html", ".htm", ".svg"}
-PDF_CONVERTER_VERSION = "3"
+PDF_CONVERTER_VERSION = "4"
+PDF_PREVIEW_MAX_EDGE = 2200
+PDF_PREVIEW_WEBP_QUALITY = 84
 SVG_NS = "http://www.w3.org/2000/svg"
 XLINK_NS = "http://www.w3.org/1999/xlink"
 ET.register_namespace("", SVG_NS)
@@ -618,10 +625,35 @@ SVG_ZOOM_JS = r"""
     }
 
     function detectMobileColumns(svg){
-        if(
-            !window.matchMedia("(max-width:800px)").matches ||
-            !svgHasText(svg)
-        ){
+        if(!window.matchMedia("(max-width:800px)").matches){
+            return null;
+        }
+
+        const preparedLayout = svg.getAttribute("data-mobile-layout");
+        if(preparedLayout){
+            try{
+                const columns = JSON.parse(preparedLayout);
+                if(
+                    Array.isArray(columns) &&
+                    columns.length &&
+                    columns.every(column =>
+                        Number.isFinite(column.x) &&
+                        Number.isFinite(column.y) &&
+                        Number.isFinite(column.width) &&
+                        Number.isFinite(column.height) &&
+                        column.width > 0 &&
+                        column.height > 0
+                    )
+                ){
+                    return columns;
+                }
+            }
+            catch(error){
+                console.warn("Invalid prepared mobile SVG layout",error);
+            }
+        }
+
+        if(!svgHasText(svg)){
             return null;
         }
 
@@ -762,10 +794,102 @@ SVG_ZOOM_JS = r"""
         });
     }
 
+    function visibleSvgImages(container){
+        return [...container.querySelectorAll("image")]
+            .filter(image => !image.closest("mask,defs,clipPath,pattern"));
+    }
+
+    function activateDeferredImages(container){
+        const images = [
+            ...container.querySelectorAll("image[data-deferred-href]")
+        ];
+        const sources = [...new Set(
+            images.map(image => image.getAttribute("data-deferred-href"))
+                .filter(Boolean)
+        )];
+
+        images.forEach(image => {
+            const source = image.getAttribute("data-deferred-href");
+            if(!source){
+                return;
+            }
+            image.setAttribute("href",source);
+            image.setAttributeNS(
+                "http://www.w3.org/1999/xlink",
+                "xlink:href",
+                source
+            );
+            image.removeAttribute("data-deferred-href");
+        });
+
+        if(sources.length === 0){
+            return Promise.resolve();
+        }
+
+        return Promise.race([
+            Promise.all(sources.map(source => new Promise(resolve => {
+                const preload = new Image();
+                preload.onload = resolve;
+                preload.onerror = resolve;
+                preload.src = source;
+            }))),
+            new Promise(resolve => window.setTimeout(resolve,8000))
+        ]);
+    }
+
+    let deferredColumnObserver = null;
+
+    function observeDeferredColumn(frame){
+        if(!frame.querySelector("image[data-deferred-href]")){
+            return;
+        }
+
+        if(!("IntersectionObserver" in window)){
+            activateDeferredImages(frame);
+            return;
+        }
+
+        if(!deferredColumnObserver){
+            deferredColumnObserver = new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    if(entry.isIntersecting){
+                        activateDeferredImages(entry.target);
+                        deferredColumnObserver.unobserve(entry.target);
+                    }
+                });
+            },{
+                rootMargin:"700px 0px",
+                threshold:0
+            });
+        }
+        deferredColumnObserver.observe(frame);
+    }
+
+    function boundsIntersectColumn(bounds,column){
+        return Boolean(
+            bounds &&
+            bounds.x < column.x + column.width &&
+            bounds.x + bounds.width > column.x &&
+            bounds.y < column.y + column.height &&
+            bounds.y + bounds.height > column.y
+        );
+    }
+
     function createMobileColumns(svg,columns){
         const wrapper = document.createElement("div");
         wrapper.className = "mobile-svg-columns";
         wrapper.dataset.columnLayoutDetected = "true";
+
+        const sourceImageBounds = new Map();
+        visibleSvgImages(svg).forEach((image,index) => {
+            image.setAttribute("data-mobile-image-index",String(index));
+            try{
+                sourceImageBounds.set(index,elementBoundsInRoot(image,svg));
+            }
+            catch(error){
+                sourceImageBounds.set(index,null);
+            }
+        });
 
         const clones = columns.map((column,index) => {
             const frame = document.createElement("div");
@@ -777,6 +901,20 @@ SVG_ZOOM_JS = r"""
             clone.removeAttribute("style");
             clone.removeAttribute("data-zoom-ready");
             clone.querySelectorAll(".svg-zoom-hotspot").forEach(node => node.remove());
+            visibleSvgImages(clone).forEach(image => {
+                const imageIndex = Number(
+                    image.getAttribute("data-mobile-image-index")
+                );
+                if(
+                    Number.isFinite(imageIndex) &&
+                    !boundsIntersectColumn(
+                        sourceImageBounds.get(imageIndex),
+                        column
+                    )
+                ){
+                    image.remove();
+                }
+            });
             makeIdsUnique(
                 clone,
                 "mobile-row-" + column.rowIndex +
@@ -794,12 +932,20 @@ SVG_ZOOM_JS = r"""
             );
             frame.appendChild(clone);
             wrapper.appendChild(frame);
+            if(index > 0){
+                observeDeferredColumn(frame);
+            }
             return clone;
         });
 
         viewer.classList.remove("mobile-svg-scroll");
         viewer.scrollLeft = 0;
         svg.replaceWith(wrapper);
+        /* Observe after insertion: some browsers do not dispatch
+           IntersectionObserver callbacks for detached elements. */
+        [...wrapper.querySelectorAll(".mobile-svg-column-frame")]
+            .slice(1)
+            .forEach(observeDeferredColumn);
         return clones;
     }
 
@@ -1329,6 +1475,9 @@ SVG_ZOOM_JS = r"""
                     ":scope > .mobile-svg-column-frame > svg"
                 )
             ];
+            if(columnSvgs[0]){
+                await activateDeferredImages(columnSvgs[0]);
+            }
             await nextFrame();
             columnSvgs.forEach(prepareSvg);
             await nextFrame();
@@ -1345,10 +1494,14 @@ SVG_ZOOM_JS = r"""
 
         if(columns){
             const columnSvgs = createMobileColumns(svg,columns);
+            if(columnSvgs[0]){
+                await activateDeferredImages(columnSvgs[0]);
+            }
             await nextFrame();
             columnSvgs.forEach(prepareSvg);
         }
         else{
+            await activateDeferredImages(svg);
             prepareSvg(svg);
         }
 
@@ -1974,13 +2127,195 @@ def file_sha256(path: Path) -> str:
 def converted_svg_matches(svg_path: Path, pdf_hash: str) -> bool:
     try:
         _event, root = next(ET.iterparse(svg_path, events=("start",)))
+        assets_directory = root.get("data-assets-directory")
+        assets_are_ready = (
+            not assets_directory or
+            (svg_path.parent / assets_directory).is_dir()
+        )
         return (
             root.get("data-source-pdf-sha256") == pdf_hash
             and root.get("data-pdf-converter-version")
             == PDF_CONVERTER_VERSION
+            and assets_are_ready
         )
     except (ET.ParseError, OSError, StopIteration):
         return False
+
+
+def decode_image_data_uri(value: str):
+    """Decode an SVG image data URI and return its MIME type and bytes."""
+    if not value.startswith("data:image/") or "," not in value:
+        return None
+    header, payload = value.split(",", 1)
+    mime = header[5:].split(";", 1)[0].lower()
+    try:
+        raw_data = (
+            base64.b64decode(payload, validate=False)
+            if ";base64" in header.lower()
+            else unquote_to_bytes(payload)
+        )
+    except (ValueError, binascii.Error):
+        return None
+    return mime, raw_data
+
+
+def image_extension(mime: str) -> str:
+    return {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+        "image/tiff": ".tif",
+        "image/jp2": ".jp2",
+        "image/jpx": ".jp2",
+    }.get(mime, ".img")
+
+
+def asset_url(prefix: str, filename: str) -> str:
+    return quote(f"{prefix}/{filename}", safe="/._-")
+
+
+def save_full_image_asset(
+    raw_data: bytes,
+    mime: str,
+    asset_directory: Path,
+    url_prefix: str,
+    state,
+) -> str:
+    digest = hashlib.sha256(raw_data).hexdigest()[:16]
+    cache_key = ("full", digest, mime)
+    if cache_key in state["cache"]:
+        return state["cache"][cache_key]
+
+    filename = f"image_{digest}_full{image_extension(mime)}"
+    output_path = asset_directory / filename
+    if not output_path.exists():
+        output_path.write_bytes(raw_data)
+    state["full_bytes"] += len(raw_data)
+    url = asset_url(url_prefix, filename)
+    state["cache"][cache_key] = url
+    return url
+
+
+def save_preview_image_asset(
+    raw_data: bytes,
+    mime: str,
+    asset_directory: Path,
+    url_prefix: str,
+    state,
+) -> str:
+    digest = hashlib.sha256(raw_data).hexdigest()[:16]
+    cache_key = ("preview", digest, mime)
+    if cache_key in state["cache"]:
+        return state["cache"][cache_key]
+
+    filename = f"image_{digest}_preview.webp"
+    output_path = asset_directory / filename
+    with Image.open(BytesIO(raw_data)) as source_image:
+        source_image.load()
+        source_image = source_image.copy()
+        original_width, original_height = source_image.size
+        if max(source_image.size) > PDF_PREVIEW_MAX_EDGE:
+            source_image.thumbnail(
+                (PDF_PREVIEW_MAX_EDGE, PDF_PREVIEW_MAX_EDGE),
+                Image.Resampling.LANCZOS,
+            )
+
+        has_alpha = (
+            "A" in source_image.getbands() or
+            "transparency" in source_image.info
+        )
+        target_mode = "RGBA" if has_alpha else "RGB"
+        converted = source_image.convert(target_mode)
+
+        colour_sample = converted.convert("RGB")
+        colour_sample.thumbnail((256, 256), Image.Resampling.BILINEAR)
+        colours = colour_sample.getcolors(maxcolors=512)
+        looks_like_graphic = colours is not None and len(colours) <= 384
+
+        save_options = {"format": "WEBP", "method": 6}
+        if looks_like_graphic:
+            save_options["lossless"] = True
+        else:
+            save_options["quality"] = PDF_PREVIEW_WEBP_QUALITY
+        converted.save(output_path, **save_options)
+
+    state["preview_bytes"] += output_path.stat().st_size
+    state["original_pixels"] += original_width * original_height
+    state["cache"][cache_key] = asset_url(url_prefix, filename)
+    return state["cache"][cache_key]
+
+
+def externalize_svg_images(
+    root: ET.Element,
+    asset_directory: Path,
+    url_prefix: str,
+    state,
+) -> int:
+    """Replace embedded raster payloads with preview and on-demand assets."""
+    converted_count = 0
+    for image in (
+        element for element in root.iter()
+        if local_tag_name(element.tag) == "image"
+    ):
+        href = (
+            image.get("href") or
+            image.get(f"{{{XLINK_NS}}}href") or
+            ""
+        )
+        decoded = decode_image_data_uri(href)
+        if decoded:
+            mime, raw_data = decoded
+            try:
+                preview_url = save_preview_image_asset(
+                    raw_data,
+                    mime,
+                    asset_directory,
+                    url_prefix,
+                    state,
+                )
+                full_url = save_full_image_asset(
+                    raw_data,
+                    mime,
+                    asset_directory,
+                    url_prefix,
+                    state,
+                )
+            except Exception as error:
+                print(
+                    f"ATTENZIONE: anteprima immagine non generata: {error}",
+                    file=sys.stderr,
+                )
+            else:
+                image.set("href", preview_url)
+                image.set(f"{{{XLINK_NS}}}href", preview_url)
+                image.set("data-preview-asset", "true")
+                if not image.get("data-lightbox-href"):
+                    image.set("data-lightbox-href", full_url)
+                converted_count += 1
+
+        lightbox_source = image.get("data-lightbox-href", "")
+        lightbox_decoded = decode_image_data_uri(lightbox_source)
+        if lightbox_decoded:
+            mime, raw_data = lightbox_decoded
+            try:
+                image.set(
+                    "data-lightbox-href",
+                    save_full_image_asset(
+                        raw_data,
+                        mime,
+                        asset_directory,
+                        url_prefix,
+                        state,
+                    ),
+                )
+            except OSError as error:
+                print(
+                    f"ATTENZIONE: sorgente zoom non esportata: {error}",
+                    file=sys.stderr,
+                )
+    return converted_count
 
 
 def add_pdf_lightbox_sources(
@@ -2043,11 +2378,257 @@ def add_pdf_lightbox_sources(
     return len(visible_images), composite_count
 
 
+def pdf_page_layout_items(page, offset_x: float, offset_y: float):
+    """Collect the same text/image geometry used by the mobile JS fallback."""
+    items = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            bbox = line.get("bbox")
+            if not bbox:
+                continue
+            x0, y0, x1, y1 = map(float, bbox)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            items.append({
+                "x": x0 + offset_x,
+                "y": y0 + offset_y,
+                "width": x1 - x0,
+                "height": y1 - y0,
+                "kind": "text",
+            })
+
+    for image in page.get_image_info():
+        bbox = image.get("bbox")
+        if not bbox:
+            continue
+        x0, y0, x1, y1 = map(float, bbox)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        items.append({
+            "x": x0 + offset_x,
+            "y": y0 + offset_y,
+            "width": x1 - x0,
+            "height": y1 - y0,
+            "kind": "image",
+        })
+
+    for item in items:
+        item["center_x"] = item["x"] + item["width"] / 2
+        item["center_y"] = item["y"] + item["height"] / 2
+        item["min_y"] = item["y"]
+        item["max_y"] = item["y"] + item["height"]
+    return items
+
+
+def layout_ranges_overlap(first, second) -> bool:
+    overlap = min(first["max_y"], second["max_y"]) - max(
+        first["min_y"], second["min_y"]
+    )
+    smaller_height = min(
+        first["max_y"] - first["min_y"],
+        second["max_y"] - second["min_y"],
+    )
+    return smaller_height > 0 and overlap / smaller_height >= 0.18
+
+
+def detect_layout_columns(items, content_width: float, content_height: float):
+    if len(items) < 2:
+        return None
+    sorted_items = sorted(items, key=lambda item: item["center_x"])
+    minimum_gap = content_width * 0.105
+    gaps = []
+    for first, second in zip(sorted_items, sorted_items[1:]):
+        gap = second["center_x"] - first["center_x"]
+        if gap >= minimum_gap:
+            gaps.append({
+                "size": gap,
+                "boundary": (first["center_x"] + second["center_x"]) / 2,
+            })
+    if not gaps:
+        return None
+
+    largest_gap = max(gap["size"] for gap in gaps)
+    selected = sorted(
+        sorted(
+            (gap for gap in gaps if gap["size"] >= largest_gap * 0.68),
+            key=lambda gap: gap["size"],
+            reverse=True,
+        )[:3],
+        key=lambda gap: gap["boundary"],
+    )
+    boundaries = [gap["boundary"] for gap in selected]
+    groups = [[] for _index in range(len(boundaries) + 1)]
+    for item in sorted_items:
+        group_index = next(
+            (
+                index for index, boundary in enumerate(boundaries)
+                if item["center_x"] < boundary
+            ),
+            len(groups) - 1,
+        )
+        groups[group_index].append(item)
+    if any(not group for group in groups):
+        return None
+
+    ranges = [
+        {
+            "min_y": min(item["min_y"] for item in group),
+            "max_y": max(item["max_y"] for item in group),
+        }
+        for group in groups
+    ]
+    if any(
+        not layout_ranges_overlap(first, second)
+        for first, second in zip(ranges, ranges[1:])
+    ):
+        return None
+
+    columns = []
+    for group in groups:
+        min_x = min(item["x"] for item in group)
+        max_x = max(item["x"] + item["width"] for item in group)
+        min_y = min(item["min_y"] for item in group)
+        max_y = max(item["max_y"] for item in group)
+        width = max_x - min_x
+        height = max_y - min_y
+        horizontal_padding = max(width * 0.035, content_width * 0.006)
+        vertical_padding = max(height * 0.018, content_height * 0.006)
+        columns.append({
+            "x": min_x - horizontal_padding,
+            "y": min_y - vertical_padding,
+            "width": width + horizontal_padding * 2,
+            "height": height + vertical_padding * 2,
+        })
+    if any(column["width"] < content_width * 0.16 for column in columns):
+        return None
+    return columns
+
+
+def detect_layout_horizontal_bands(items, content_height: float):
+    if len(items) < 4:
+        return None
+    intervals = sorted(
+        ({"min": item["min_y"], "max": item["max_y"]} for item in items),
+        key=lambda interval: interval["min"],
+    )
+    occupied = []
+    for interval in intervals:
+        if occupied and interval["min"] <= occupied[-1]["max"]:
+            occupied[-1]["max"] = max(occupied[-1]["max"], interval["max"])
+        else:
+            occupied.append(dict(interval))
+
+    text_heights = [
+        item["height"] for item in items
+        if item["kind"] == "text" and item["height"] > 0
+    ]
+    all_heights = [item["height"] for item in items if item["height"] > 0]
+    typical_height = statistics.median(text_heights or all_heights)
+    minimum_gap = max(content_height * 0.012, typical_height * 1.5)
+    minimum_band_height = max(content_height * 0.06, typical_height * 6)
+    candidates = []
+    for first, second in zip(occupied, occupied[1:]):
+        start, end = first["max"], second["min"]
+        if end - start >= minimum_gap:
+            candidates.append((start + end) / 2)
+    if not candidates:
+        return None
+
+    boundaries = []
+    previous = 0.0
+    for index, boundary in enumerate(candidates):
+        next_boundary = (
+            candidates[index + 1]
+            if index + 1 < len(candidates)
+            else content_height
+        )
+        if (
+            boundary - previous >= minimum_band_height and
+            next_boundary - boundary >= minimum_band_height
+        ):
+            boundaries.append(boundary)
+            previous = boundary
+    if not boundaries:
+        return None
+
+    edges = [0.0, *boundaries, content_height]
+    bands = []
+    for start, end in zip(edges, edges[1:]):
+        band_items = [
+            item for item in items
+            if start <= item["center_y"] < end
+        ]
+        if len(band_items) < 2:
+            return None
+        bands.append(band_items)
+    return bands if len(bands) > 1 else None
+
+
+def mobile_layout_from_pdf(document, page_sizes, output_width, output_height, page_gap):
+    page_items = []
+    current_y = 0.0
+    for page, (width, height) in zip(document, page_sizes):
+        offset_x = (output_width - width) / 2
+        items = pdf_page_layout_items(page, offset_x, current_y)
+        page_items.append(items)
+        current_y += height + page_gap
+
+    all_items = [item for items in page_items for item in items]
+    if len(all_items) < 4:
+        return None
+
+    rows = page_items if len(page_items) > 1 else (
+        detect_layout_horizontal_bands(all_items, output_height)
+    )
+    result = []
+    if rows:
+        for row_index, items in enumerate(rows):
+            columns = detect_layout_columns(items, output_width, output_height)
+            if not columns:
+                if len(page_items) == 1:
+                    return None
+                min_x = min(item["x"] for item in items)
+                max_x = max(item["x"] + item["width"] for item in items)
+                min_y = min(item["min_y"] for item in items)
+                max_y = max(item["max_y"] for item in items)
+                width = max_x - min_x
+                height = max_y - min_y
+                horizontal_padding = max(width * 0.035, output_width * 0.006)
+                vertical_padding = max(height * 0.018, output_height * 0.006)
+                columns = [{
+                    "x": min_x - horizontal_padding,
+                    "y": min_y - vertical_padding,
+                    "width": width + horizontal_padding * 2,
+                    "height": height + vertical_padding * 2,
+                }]
+            for column_index, column in enumerate(columns):
+                result.append({
+                    **column,
+                    "rowIndex": row_index,
+                    "columnIndex": column_index,
+                })
+        return result
+
+    if output_width / output_height < 1.15:
+        return None
+    columns = detect_layout_columns(all_items, output_width, output_height)
+    if not columns:
+        return None
+    return [
+        {**column, "rowIndex": 0, "columnIndex": index}
+        for index, column in enumerate(columns)
+    ]
+
+
 def convert_pdf_to_svg(
     source: Path,
     destination: Path,
     page_gap=32.0,
     source_hash=None,
+    asset_directory=None,
+    asset_url_prefix=None,
 ):
     document = pymupdf.open(source)
     if document.page_count == 0:
@@ -2063,6 +2644,17 @@ def convert_pdf_to_svg(
         sum(height for _width, height in page_sizes)
         + page_gap * (document.page_count - 1)
     )
+    asset_directory = Path(asset_directory) if asset_directory else (
+        destination.parent / f"{destination.stem}_assets"
+    )
+    asset_url_prefix = asset_url_prefix or asset_directory.name
+    asset_directory.mkdir(parents=True, exist_ok=True)
+    asset_state = {
+        "cache": {},
+        "preview_bytes": 0,
+        "full_bytes": 0,
+        "original_pixels": 0,
+    }
     outer = ET.Element(
         f"{{{SVG_NS}}}svg",
         {
@@ -2074,8 +2666,28 @@ def convert_pdf_to_svg(
             "data-source-pdf-sha256": source_hash or file_sha256(source),
             "data-pdf-converter-version": PDF_CONVERTER_VERSION,
             "data-page-count": str(document.page_count),
+            "data-assets-directory": asset_url_prefix,
         },
     )
+    mobile_layout = mobile_layout_from_pdf(
+        document,
+        page_sizes,
+        output_width,
+        output_height,
+        page_gap,
+    )
+    if mobile_layout:
+        compact_layout = [
+            {
+                key:(round(value, 3) if isinstance(value, float) else value)
+                for key, value in column.items()
+            }
+            for column in mobile_layout
+        ]
+        outer.set(
+            "data-mobile-layout",
+            json.dumps(compact_layout, separators=(",", ":")),
+        )
     embedded_fonts = extract_embedded_fonts(document)
     add_font_styles(outer, embedded_fonts)
     title = ET.SubElement(outer, f"{{{SVG_NS}}}title")
@@ -2083,6 +2695,7 @@ def convert_pdf_to_svg(
 
     current_y = 0.0
     image_count = 0
+    external_image_count = 0
     text_count = 0
     link_count = 0
     for page_number, page in enumerate(document, start=1):
@@ -2092,6 +2705,12 @@ def convert_pdf_to_svg(
             document,
             page,
             page_root,
+        )
+        external_image_count += externalize_svg_images(
+            page_root,
+            asset_directory,
+            asset_url_prefix,
+            asset_state,
         )
         prefix_svg_references(page_root, f"p{page_number}_")
         group = ET.SubElement(
@@ -2134,9 +2753,12 @@ def convert_pdf_to_svg(
     return {
         "pages": len(page_sizes),
         "images": image_count,
+        "external_images": external_image_count,
         "text_elements": text_count,
         "links": link_count,
         "bytes": destination.stat().st_size,
+        "preview_bytes": asset_state["preview_bytes"],
+        "full_bytes": asset_state["full_bytes"],
     }
 
 
@@ -2169,12 +2791,23 @@ def convert_project_pdfs(force=False):
             continue
 
         temporary_path = svg_path.with_name(svg_path.name + ".tmp")
+        asset_path = svg_path.with_name(f"{svg_path.stem}_assets")
+        temporary_asset_path = asset_path.with_name(
+            asset_path.name + ".tmp"
+        )
         try:
+            if temporary_asset_path.exists():
+                shutil.rmtree(temporary_asset_path)
             info = convert_pdf_to_svg(
                 pdf_path,
                 temporary_path,
                 source_hash=pdf_hash,
+                asset_directory=temporary_asset_path,
+                asset_url_prefix=asset_path.name,
             )
+            if asset_path.exists():
+                shutil.rmtree(asset_path)
+            temporary_asset_path.replace(asset_path)
             temporary_path.replace(svg_path)
             results.append({
                 "pdf": pdf_path,
@@ -2185,6 +2818,8 @@ def convert_project_pdfs(force=False):
         except Exception as error:
             if temporary_path.exists():
                 temporary_path.unlink()
+            if temporary_asset_path.exists():
+                shutil.rmtree(temporary_asset_path)
             results.append({
                 "pdf": pdf_path,
                 "svg": svg_path,
