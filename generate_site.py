@@ -17,7 +17,7 @@ BASE_DIR = Path("pdf")
 TEMPLATE_FILE = Path("site_template.html")
 OUTPUT_FILE = Path("index.html")
 SUPPORTED_EXTENSIONS = {".html", ".htm", ".svg"}
-PDF_CONVERTER_VERSION = "2"
+PDF_CONVERTER_VERSION = "3"
 SVG_NS = "http://www.w3.org/2000/svg"
 XLINK_NS = "http://www.w3.org/1999/xlink"
 ET.register_namespace("", SVG_NS)
@@ -29,6 +29,14 @@ SVG_ZOOM_CSS = r"""
     fill:transparent;
     stroke:none;
     cursor:zoom-in;
+    pointer-events:all;
+}
+
+.pdf-link-hotspot{
+    fill:#fff;
+    fill-opacity:.001;
+    stroke:none;
+    cursor:pointer;
     pointer-events:all;
 }
 
@@ -850,18 +858,96 @@ SVG_ZOOM_JS = r"""
 
     window.openProjectImage = openLightbox;
 
+    function promotePdfLinks(svg,hotspots){
+        if(!hotspots.length){
+            return;
+        }
+
+        const namespace = "http://www.w3.org/2000/svg";
+        const xlinkNamespace = "http://www.w3.org/1999/xlink";
+        const layer = document.createElementNS(namespace,"g");
+        layer.setAttribute("class","pdf-link-overlay-layer");
+        layer.setAttribute("aria-label","Clickable project links");
+        const viewBox = svg.viewBox.baseVal;
+
+        hotspots.forEach((hotspot,index) => {
+            const sourceAnchor = hotspot.closest("a");
+            const href = sourceAnchor && (
+                sourceAnchor.getAttribute("href") ||
+                sourceAnchor.getAttributeNS(xlinkNamespace,"href")
+            );
+
+            if(!href || !/^(?:https?:|mailto:)/i.test(href)){
+                return;
+            }
+
+            let bounds;
+            try{
+                bounds = elementBoundsInRoot(hotspot,svg);
+            }
+            catch(error){
+                console.warn("Unable to prepare PDF link",error);
+                return;
+            }
+
+            if(!bounds || bounds.width <= 0 || bounds.height <= 0){
+                return;
+            }
+
+            const intersectsViewBox =
+                bounds.x < viewBox.x + viewBox.width &&
+                bounds.x + bounds.width > viewBox.x &&
+                bounds.y < viewBox.y + viewBox.height &&
+                bounds.y + bounds.height > viewBox.y;
+
+            if(!intersectsViewBox){
+                return;
+            }
+
+            const anchor = document.createElementNS(namespace,"a");
+            anchor.setAttribute("href",href);
+            anchor.setAttributeNS(xlinkNamespace,"xlink:href",href);
+            anchor.setAttribute("target","_blank");
+            anchor.setAttribute("rel","noopener noreferrer");
+            anchor.setAttribute("aria-label","Open link: " + href);
+
+            const rect = document.createElementNS(namespace,"rect");
+            rect.setAttribute("x",bounds.x);
+            rect.setAttribute("y",bounds.y);
+            rect.setAttribute("width",bounds.width);
+            rect.setAttribute("height",bounds.height);
+            rect.setAttribute("class","pdf-link-hotspot pdf-link-overlay");
+            rect.setAttribute("tabindex","0");
+            rect.setAttribute("role","link");
+            anchor.appendChild(rect);
+            layer.appendChild(anchor);
+
+            /* Only the root-coordinate copy handles pointer input. */
+            sourceAnchor.setAttribute("pointer-events","none");
+            sourceAnchor.setAttribute("aria-hidden","true");
+        });
+
+        if(layer.childElementCount){
+            svg.appendChild(layer);
+        }
+    }
+
     function prepareSvg(svg){
         if(svg.dataset.zoomReady === "true"){
             return;
         }
 
         svg.dataset.zoomReady = "true";
+        const linkHotspots = [
+            ...svg.querySelectorAll(".pdf-link-hotspot")
+        ];
         const images = [...svg.querySelectorAll("image")]
             .filter(image => !image.closest("mask,defs,clipPath,pattern"));
         const hasText = svgHasText(svg);
 
         /* A full-page SVG containing only an image does not need a lightbox. */
         if(!hasText){
+            promotePdfLinks(svg,linkHotspots);
             return;
         }
 
@@ -918,6 +1004,11 @@ SVG_ZOOM_JS = r"""
             });
             svg.appendChild(hotspot);
         });
+
+        /* Image hotspots are appended to the root SVG and would otherwise
+           cover PDF annotations. Re-create the links in root coordinates so
+           they always remain the uppermost interactive layer. */
+        promotePdfLinks(svg,linkHotspots);
     }
 
     function prepareCurrentSvg(){
@@ -1457,6 +1548,70 @@ def append_searchable_text_layer(group, page, page_number, faces) -> int:
     return count
 
 
+def append_pdf_link_layer(group, page, page_number) -> int:
+    """Preserve safe external PDF hyperlinks as clickable SVG regions."""
+    layer = ET.SubElement(
+        group,
+        f"{{{SVG_NS}}}g",
+        {
+            "id": f"pdf-link-layer-{page_number}",
+            "class": "pdf-link-layer",
+            "aria-label": f"Links, page {page_number}",
+        },
+    )
+
+    count = 0
+    for link in page.get_links():
+        uri = (link.get("uri") or "").strip()
+        if not re.match(r"^(?:https?://|mailto:)", uri, flags=re.I):
+            continue
+
+        rectangle_value = link.get("from")
+        if rectangle_value is None:
+            continue
+        rectangle = pymupdf.Rect(rectangle_value)
+        if rectangle.is_empty or rectangle.is_infinite:
+            continue
+
+        anchor = ET.SubElement(
+            layer,
+            f"{{{SVG_NS}}}a",
+            {
+                "id": f"pdf-link-{page_number}-{count + 1}",
+                "href": uri,
+                f"{{{XLINK_NS}}}href": uri,
+                "target": "_blank",
+                "rel": "noopener noreferrer",
+                "aria-label": f"Open link: {uri}",
+            },
+        )
+        title = ET.SubElement(anchor, f"{{{SVG_NS}}}title")
+        title.text = uri
+        ET.SubElement(
+            anchor,
+            f"{{{SVG_NS}}}rect",
+            {
+                "x": f"{float(rectangle.x0):.4f}",
+                "y": f"{float(rectangle.y0):.4f}",
+                "width": f"{float(rectangle.width):.4f}",
+                "height": f"{float(rectangle.height):.4f}",
+                "class": "pdf-link-hotspot",
+                "fill": "#ffffff",
+                "fill-opacity": "0.001",
+                "stroke": "none",
+                "pointer-events": "all",
+                "style": "cursor:pointer",
+                "tabindex": "0",
+                "role": "link",
+            },
+        )
+        count += 1
+
+    if count == 0:
+        group.remove(layer)
+    return count
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -1578,6 +1733,7 @@ def convert_pdf_to_svg(
     current_y = 0.0
     image_count = 0
     text_count = 0
+    link_count = 0
     for page_number, page in enumerate(document, start=1):
         width, height = page_sizes[page_number - 1]
         page_root = ET.fromstring(page.get_svg_image(text_as_path=True))
@@ -1613,6 +1769,7 @@ def convert_pdf_to_svg(
         text_count += append_searchable_text_layer(
             group, page, page_number, embedded_fonts
         )
+        link_count += append_pdf_link_layer(group, page, page_number)
         image_count += page_image_count
         current_y += height + page_gap
 
@@ -1627,6 +1784,7 @@ def convert_pdf_to_svg(
         "pages": len(page_sizes),
         "images": image_count,
         "text_elements": text_count,
+        "links": link_count,
         "bytes": destination.stat().st_size,
     }
 

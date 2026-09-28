@@ -902,6 +902,14 @@ footer a:hover{
     pointer-events:all;
 }
 
+.pdf-link-hotspot{
+    fill:#fff;
+    fill-opacity:.001;
+    stroke:none;
+    cursor:pointer;
+    pointer-events:all;
+}
+
 .mobile-svg-columns{
     display:flex;
     flex-direction:column;
@@ -2438,18 +2446,96 @@ function(){
 
     window.openProjectImage = openLightbox;
 
+    function promotePdfLinks(svg,hotspots){
+        if(!hotspots.length){
+            return;
+        }
+
+        const namespace = "http://www.w3.org/2000/svg";
+        const xlinkNamespace = "http://www.w3.org/1999/xlink";
+        const layer = document.createElementNS(namespace,"g");
+        layer.setAttribute("class","pdf-link-overlay-layer");
+        layer.setAttribute("aria-label","Clickable project links");
+        const viewBox = svg.viewBox.baseVal;
+
+        hotspots.forEach((hotspot,index) => {
+            const sourceAnchor = hotspot.closest("a");
+            const href = sourceAnchor && (
+                sourceAnchor.getAttribute("href") ||
+                sourceAnchor.getAttributeNS(xlinkNamespace,"href")
+            );
+
+            if(!href || !/^(?:https?:|mailto:)/i.test(href)){
+                return;
+            }
+
+            let bounds;
+            try{
+                bounds = elementBoundsInRoot(hotspot,svg);
+            }
+            catch(error){
+                console.warn("Unable to prepare PDF link",error);
+                return;
+            }
+
+            if(!bounds || bounds.width <= 0 || bounds.height <= 0){
+                return;
+            }
+
+            const intersectsViewBox =
+                bounds.x < viewBox.x + viewBox.width &&
+                bounds.x + bounds.width > viewBox.x &&
+                bounds.y < viewBox.y + viewBox.height &&
+                bounds.y + bounds.height > viewBox.y;
+
+            if(!intersectsViewBox){
+                return;
+            }
+
+            const anchor = document.createElementNS(namespace,"a");
+            anchor.setAttribute("href",href);
+            anchor.setAttributeNS(xlinkNamespace,"xlink:href",href);
+            anchor.setAttribute("target","_blank");
+            anchor.setAttribute("rel","noopener noreferrer");
+            anchor.setAttribute("aria-label","Open link: " + href);
+
+            const rect = document.createElementNS(namespace,"rect");
+            rect.setAttribute("x",bounds.x);
+            rect.setAttribute("y",bounds.y);
+            rect.setAttribute("width",bounds.width);
+            rect.setAttribute("height",bounds.height);
+            rect.setAttribute("class","pdf-link-hotspot pdf-link-overlay");
+            rect.setAttribute("tabindex","0");
+            rect.setAttribute("role","link");
+            anchor.appendChild(rect);
+            layer.appendChild(anchor);
+
+            /* Only the root-coordinate copy handles pointer input. */
+            sourceAnchor.setAttribute("pointer-events","none");
+            sourceAnchor.setAttribute("aria-hidden","true");
+        });
+
+        if(layer.childElementCount){
+            svg.appendChild(layer);
+        }
+    }
+
     function prepareSvg(svg){
         if(svg.dataset.zoomReady === "true"){
             return;
         }
 
         svg.dataset.zoomReady = "true";
+        const linkHotspots = [
+            ...svg.querySelectorAll(".pdf-link-hotspot")
+        ];
         const images = [...svg.querySelectorAll("image")]
             .filter(image => !image.closest("mask,defs,clipPath,pattern"));
         const hasText = svgHasText(svg);
 
         /* A full-page SVG containing only an image does not need a lightbox. */
         if(!hasText){
+            promotePdfLinks(svg,linkHotspots);
             return;
         }
 
@@ -2506,6 +2592,11 @@ function(){
             });
             svg.appendChild(hotspot);
         });
+
+        /* Image hotspots are appended to the root SVG and would otherwise
+           cover PDF annotations. Re-create the links in root coordinates so
+           they always remain the uppermost interactive layer. */
+        promotePdfLinks(svg,linkHotspots);
     }
 
     function prepareCurrentSvg(){
