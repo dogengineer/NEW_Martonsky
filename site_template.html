@@ -404,6 +404,11 @@ main{
     overflow-x:auto;
 }
 
+#svgViewer.content-loading{
+    visibility:hidden;
+    opacity:0;
+}
+
 #svgViewer svg{
     display:block;
     max-width:none;
@@ -1045,6 +1050,7 @@ function hideAllViewers(){
     htmlViewer.innerHTML = "";
     svgViewer.innerHTML = "";
     htmlViewer.classList.remove("content-loading");
+    svgViewer.classList.remove("content-loading");
 
     [viewer,htmlViewer,svgViewer,contactViewer]
         .forEach(element => element.classList.remove(
@@ -1061,6 +1067,7 @@ window.loadSVG = async function(url){
     closeMobileMenu();
     hideAllViewers();
 
+    svgViewer.classList.add("content-loading");
     svgViewer.style.display = "block";
     loading.classList.add("loading-visible");
 
@@ -1162,6 +1169,27 @@ window.loadSVG = async function(url){
 
         svgViewer.scrollLeft = 0;
 
+        if(document.fonts && document.fonts.ready){
+            await document.fonts.ready;
+        }
+
+        if(renderId !== currentRenderId){
+            return;
+        }
+
+        if(typeof window.prepareProjectSvgLayout === "function"){
+            await window.prepareProjectSvgLayout();
+        }
+
+        if(renderId !== currentRenderId){
+            return;
+        }
+
+        await new Promise(resolve =>
+            window.requestAnimationFrame(resolve)
+        );
+
+        svgViewer.classList.remove("content-loading");
         loading.classList.remove("loading-visible");
         revealProject(svgViewer);
 
@@ -1178,6 +1206,7 @@ window.loadSVG = async function(url){
         }
 
         loading.classList.remove("loading-visible");
+        svgViewer.classList.remove("content-loading");
 
         svgViewer.innerHTML =
         "<p style='padding:40px;text-align:center'>Unable to load SVG.</p>";

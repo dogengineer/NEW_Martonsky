@@ -1011,7 +1011,13 @@ SVG_ZOOM_JS = r"""
         promotePdfLinks(svg,linkHotspots);
     }
 
-    function prepareCurrentSvg(){
+    function nextFrame(){
+        return new Promise(resolve =>
+            window.requestAnimationFrame(resolve)
+        );
+    }
+
+    async function prepareCurrentSvg(){
         const existingColumns =
             viewer.querySelector(".mobile-svg-columns");
 
@@ -1021,9 +1027,9 @@ SVG_ZOOM_JS = r"""
                     ":scope > .mobile-svg-column-frame > svg"
                 )
             ];
-            window.requestAnimationFrame(() => {
-                columnSvgs.forEach(prepareSvg);
-            });
+            await nextFrame();
+            columnSvgs.forEach(prepareSvg);
+            await nextFrame();
             return;
         }
 
@@ -1032,21 +1038,52 @@ SVG_ZOOM_JS = r"""
             return;
         }
 
-        window.requestAnimationFrame(() => {
-            window.requestAnimationFrame(() => {
-                const columns = detectMobileColumns(svg);
+        await nextFrame();
+        const columns = detectMobileColumns(svg);
 
-                if(columns){
-                    createMobileColumns(svg,columns).forEach(prepareSvg);
-                }
-                else{
-                    prepareSvg(svg);
-                }
-            });
-        });
+        if(columns){
+            const columnSvgs = createMobileColumns(svg,columns);
+            await nextFrame();
+            columnSvgs.forEach(prepareSvg);
+        }
+        else{
+            prepareSvg(svg);
+        }
+
+        await nextFrame();
     }
 
-    const observer = new MutationObserver(prepareCurrentSvg);
+    let activePreparation = null;
+    let fallbackTimer = 0;
+
+    window.prepareProjectSvgLayout = function(){
+        window.clearTimeout(fallbackTimer);
+
+        if(activePreparation){
+            return activePreparation;
+        }
+
+        activePreparation = prepareCurrentSvg().finally(() => {
+            window.clearTimeout(fallbackTimer);
+            activePreparation = null;
+        });
+        return activePreparation;
+    };
+
+    /* Compatibility fallback for pages generated with an older template.
+       The current template calls prepareProjectSvgLayout() directly and waits
+       for it before revealing the project. */
+    const observer = new MutationObserver(() => {
+        window.clearTimeout(fallbackTimer);
+        fallbackTimer = window.setTimeout(() => {
+            if(
+                viewer.querySelector("svg") &&
+                !viewer.classList.contains("content-loading")
+            ){
+                window.prepareProjectSvgLayout();
+            }
+        },80);
+    });
     observer.observe(viewer,{childList:true,subtree:false});
 
     closeButton.addEventListener("click",closeLightbox);
